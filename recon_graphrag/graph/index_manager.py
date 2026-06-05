@@ -41,7 +41,7 @@ class IndexManager:
             self.embedding_dim = 1536
 
     def create_indexes(self):
-        """Create all required vector and fulltext indexes."""
+        """Create all required vector, fulltext, and uniqueness indexes."""
         self._drop_indexes()
         self.graph_store.create_vector_index(
             name=self.config.chunk_vector_index,
@@ -66,6 +66,7 @@ class IndexManager:
             label=self.config.entity_label,
             node_properties=["name"],
         )
+        self._create_constraints()
 
     def _drop_indexes(self):
         """Drop existing indexes so they can be recreated with updated settings."""
@@ -79,6 +80,19 @@ class IndexManager:
                 self.graph_store.execute_query(f"DROP INDEX `{name}` IF EXISTS")
             except Exception:
                 pass
+
+    def _create_constraints(self):
+        """Create constraints required by the community hierarchy."""
+        try:
+            self.graph_store.execute_query(
+                """
+                CREATE CONSTRAINT community_unique IF NOT EXISTS
+                FOR (c:Community)
+                REQUIRE (c.graph_name, c.level, c.id) IS UNIQUE
+                """
+            )
+        except Exception as e:
+            print(f"  Warning: community uniqueness constraint failed: {e}")
 
     async def resolve_entities(self):
         """Run entity resolution to merge duplicate __Entity__ nodes.

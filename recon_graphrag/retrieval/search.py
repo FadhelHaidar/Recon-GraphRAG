@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from recon_graphrag.llm.base import BaseLLM
+from recon_graphrag.communities.detection import DEFAULT_GRAPH_NAME
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graph.base import GraphStore
+from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.types import SearchResult
-from recon_graphrag.retrieval.local import LocalSearchRetriever
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
 from recon_graphrag.retrieval.drift import DriftSearchRetriever
+from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
+from recon_graphrag.retrieval.local import LocalSearchRetriever
 
 
 class GraphRAG:
@@ -27,10 +28,15 @@ class GraphRAG:
         graph_store: GraphStore,
         llm: BaseLLM,
         embedder: BaseEmbedder,
+        graph_name: str = DEFAULT_GRAPH_NAME,
     ):
         self.local = LocalSearchRetriever(graph_store, llm, embedder)
-        self.global_ = GlobalSearchRetriever(graph_store, llm, embedder)
-        self.drift = DriftSearchRetriever(graph_store, llm, embedder)
+        self.global_ = GlobalSearchRetriever(
+            graph_store, llm, embedder, graph_name=graph_name
+        )
+        self.drift = DriftSearchRetriever(
+            graph_store, llm, embedder, graph_name=graph_name
+        )
 
     async def search(
         self, query: str, mode: str = "local", **kwargs
@@ -43,7 +49,7 @@ class GraphRAG:
             **kwargs: Additional arguments passed to the specific retriever:
                 - local: top_k (int)
                 - global: top_k (int), level (int)
-                - drift: top_k (int), community_top_k (int)
+                - drift: top_k (int), community_top_k (int), community_level (int)
         """
         modes = {
             "local": self.local,
