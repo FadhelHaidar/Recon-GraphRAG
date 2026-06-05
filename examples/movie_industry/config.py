@@ -2,13 +2,11 @@
 
 import os
 
-from dotenv import load_dotenv
-load_dotenv()
-
 from neo4j import GraphDatabase
-
 from recon_graphrag import Neo4jGraphStore, create_llm, create_embedder
 
+from dotenv import load_dotenv
+load_dotenv()
 
 def get_neo4j_store() -> Neo4jGraphStore:
     url = os.getenv("NEO4J_URL", "bolt://localhost:7687")
