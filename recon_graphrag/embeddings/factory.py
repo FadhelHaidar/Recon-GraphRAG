@@ -139,6 +139,9 @@ def _create_openai_embedder(**kwargs: Any) -> BaseEmbedder:
 
 
 def _create_azure_openai_embedder(**kwargs: Any) -> BaseEmbedder:
+    deployment_name = kwargs.get("azure_deployment") or kwargs.get("model")
+    if deployment_name:
+        kwargs.setdefault("azure_deployment", deployment_name)
     return OpenAIEmbeddings(azure=True, **kwargs)
 
 

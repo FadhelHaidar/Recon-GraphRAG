@@ -55,7 +55,7 @@ class FakeLLM:
 
 
 class FakeHybridRetriever:
-    def search(self, query_text, top_k):
+    async def search(self, query_text, top_k, **kwargs):
         return SimpleNamespace(
             items=[
                 SimpleNamespace(

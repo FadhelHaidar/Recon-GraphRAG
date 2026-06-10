@@ -10,10 +10,7 @@ from typing import Optional
 
 from recon_graphrag.extraction.types import GraphDocument
 from recon_graphrag.graph.base import GraphStore
-
-
-def escape_cypher_identifier(identifier: str) -> str:
-    return "`" + identifier.replace("`", "``") + "`"
+from recon_graphrag.graph.cypher import escape_cypher_identifier
 
 
 class Neo4jGraphWriter:

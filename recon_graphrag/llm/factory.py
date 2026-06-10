@@ -57,6 +57,8 @@ class OpenAIChatLLM:
 
         self.model_name = model_name
         self.model_params = model_params or {}
+        self.azure = azure
+        self.azure_endpoint = kwargs.get("azure_endpoint")
         self.openai = openai
         client_cls = openai.AzureOpenAI if azure else openai.OpenAI
         async_client_cls = openai.AsyncAzureOpenAI if azure else openai.AsyncOpenAI
@@ -65,20 +67,26 @@ class OpenAIChatLLM:
 
     def invoke(self, prompt: str, **kwargs: Any) -> LLMResponse:
         params = {**self.model_params, **kwargs}
-        response = self.client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model_name,
-            **params,
-        )
+        try:
+            response = self.client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model_name,
+                **params,
+            )
+        except Exception as exc:
+            raise self._provider_error(exc) from exc
         return _openai_chat_response_to_llm_response(response)
 
     async def ainvoke(self, prompt: str, **kwargs: Any) -> LLMResponse:
         params = {**self.model_params, **kwargs}
-        response = await self.async_client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model_name,
-            **params,
-        )
+        try:
+            response = await self.async_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model_name,
+                **params,
+            )
+        except Exception as exc:
+            raise self._provider_error(exc) from exc
         return _openai_chat_response_to_llm_response(response)
 
     async def aclose(self) -> None:
@@ -88,6 +96,20 @@ class OpenAIChatLLM:
         async_close = getattr(self.async_client, "close", None)
         if callable(async_close):
             await async_close()
+
+    def _provider_error(self, exc: Exception) -> Exception:
+        if not self.azure or not _is_azure_deployment_not_found(exc):
+            return exc
+
+        endpoint = self.azure_endpoint or "<missing azure_endpoint>"
+        return RuntimeError(
+            "Azure OpenAI deployment was not found. "
+            f"Requested deployment/model_name='{self.model_name}' on endpoint "
+            f"'{endpoint}'. For Azure OpenAI, model_name must be the Azure "
+            "deployment name, not just the base model name. Check "
+            "AZURE_OPENAI_LLM_DEPLOYMENT_NAME, AZURE_OPENAI_ENDPOINT, and "
+            "AZURE_OPENAI_API_VERSION."
+        )
 
 
 class OllamaLLM:
@@ -136,6 +158,9 @@ def _create_openai_llm(**kwargs: Any) -> BaseLLM:
 
 
 def _create_azure_openai_llm(**kwargs: Any) -> BaseLLM:
+    deployment_name = kwargs.get("azure_deployment") or kwargs.get("model_name")
+    if deployment_name:
+        kwargs.setdefault("azure_deployment", deployment_name)
     return OpenAIChatLLM(azure=True, **kwargs)
 
 
@@ -158,6 +183,26 @@ def _openai_chat_response_to_llm_response(response: Any) -> LLMResponse:
             total_tokens=response.usage.total_tokens,
         )
     return LLMResponse(content=content, usage=usage)
+
+
+def _is_azure_deployment_not_found(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    code = getattr(exc, "code", None)
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            code = error.get("code", code)
+
+    message = str(exc)
+    return (
+        status_code == 404
+        and (
+            code == "DeploymentNotFound"
+            or "DeploymentNotFound" in message
+            or "deployment for this resource does not exist" in message
+        )
+    )
 
 
 def _ollama_chat_response_to_llm_response(response: Any) -> LLMResponse:

@@ -48,7 +48,6 @@ async def run_test_suite(test_queries: list):
 
     for item in test_queries:
         print(f"\n" + "="*60)
-        print(f"TESTING: {item['search_type']}")
         print(f"QUERY: {item['query']}")
         print(f"OBJECTIVE: {item['test_objective']}")
         print("="*60)
@@ -68,20 +67,17 @@ if __name__ == "__main__":
     # Your dictionary list of test cases
     test_suite = [
         {
-            "search_type": "Local",
             "query": "Which movies in the database were directed by Christopher Nolan and feature Cillian Murphy?",
-            "test_objective": "Verify 'DIRECTED' and 'ACTED_IN' relationship accuracy."
+            "test_objective": "Verify 'DIRECTED' and 'ACTED_IN' relationship accuracy.",
         },
         {
-            "search_type": "Global",
             "query": "What are the most common themes across high-budget sci-fi films in this collection?",
-            "test_objective": "Assess community summary quality for the 'Sci-Fi' cluster."
+            "test_objective": "Assess community summary quality for the 'Sci-Fi' cluster.",
         },
         {
-            "search_type": "Drift",
             "query": "How does the work of Hans Zimmer connect the movie Inception to the movie Dune?",
-            "test_objective": "Test pathfinding between two different directors via a shared technical node."
-        }
+            "test_objective": "Test pathfinding between two different directors via a shared technical node.",
+        },
     ]
 
     asyncio.run(run_test_suite(test_suite))

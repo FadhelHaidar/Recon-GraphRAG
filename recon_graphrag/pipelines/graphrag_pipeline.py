@@ -186,6 +186,7 @@ class GraphBuilderPipeline:
         metadata: dict,
     ) -> dict:
         chunk_extractions = {}
+        extraction_errors = {}
 
         for chunk in chunks:
             try:
@@ -196,7 +197,15 @@ class GraphBuilderPipeline:
                 validated = self.validator.validate(raw_extraction, self.schema)
                 chunk_extractions[chunk.id] = validated
             except Exception as e:
+                extraction_errors[chunk.id] = e
                 print(f"  Warning: extraction failed for chunk {chunk.id}: {e}")
+
+        if chunks and not chunk_extractions:
+            first_chunk_id, first_error = next(iter(extraction_errors.items()))
+            raise RuntimeError(
+                f"Extraction failed for all {len(chunks)} chunk(s). "
+                f"First failure was for {first_chunk_id}: {first_error}"
+            ) from first_error
 
         graph_document = self.assembler.assemble(
             document_id=document_id,
@@ -226,10 +235,12 @@ class GraphBuilderPipeline:
         )
 
     async def _resolve_entities(self):
-        """Step 2: Merge duplicate entities via SinglePropertyExactMatchResolver."""
+        """Step 2: Merge duplicate entities with the internal resolver."""
         mgr = IndexManager(self.graph_store)
         try:
-            await mgr.resolve_entities()
+            result = await mgr.resolve_entities()
+            if isinstance(result, dict) and result.get("skipped"):
+                print(f"  Warning: entity resolution skipped: {result.get('reason')}")
         except Exception as e:
             print(f"  Warning: entity resolution failed (APOC plugin required): {e}")
             if self.fail_on_resolution_error:

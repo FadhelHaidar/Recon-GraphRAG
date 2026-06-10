@@ -213,6 +213,30 @@ async def test_build_from_text_with_entity_embedding_loop(
     assert "extraction" in result
 
 
+@pytest.mark.asyncio
+async def test_build_from_text_raises_when_all_extractions_fail(
+    movie_schema, fake_embedder, fake_writer
+):
+    store = FakeGraphStore()
+    failing_llm = MagicMock()
+    failing_llm.ainvoke = AsyncMock(side_effect=RuntimeError("provider failed"))
+
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=failing_llm,
+        embedder=fake_embedder,
+        schema=movie_schema,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Extraction failed for all"):
+        await pipeline.build_from_text("Alice directed Inception.")
+
+    fake_writer.write_graph_document.assert_not_called()
+
+
 def _make_test_schema():
     return GraphSchema(
         node_types=[
