@@ -47,41 +47,23 @@ class CommunitySummarizer:
 
     async def summarize_all(self, level: int = 0) -> list[dict]:
         """Summarize all communities at a given hierarchy level."""
-        print(f"Starting community summarization: graph_name={self.graph_name} level={level}")
         communities = self._get_communities(level)
         if not communities:
-            print(f"No communities found for summarization: graph_name={self.graph_name} level={level}")
+            print(f"  No communities found at level {level}")
             return []
 
-        total = len(communities)
-        print(f"Summarizing communities: graph_name={self.graph_name} level={level} count={total}")
-
         results = []
-        succeeded = 0
-        skipped = 0
-        failed = 0
-
-        for i, comm in enumerate(communities, start=1):
+        for comm in communities:
             cid = comm["id"]
-            print(f"[{i}/{total}] Summarizing community {cid} ...")
+            print(f"  Summarizing community {cid} ({comm['entity_count']} entities)...")
             try:
                 summary = await self.summarize_community(cid, level)
                 if not summary.strip():
-                    print(f"  [{i}/{total}] ⊘ community {cid} skipped (empty summary)")
-                    skipped += 1
                     continue
                 self._store_summary(cid, level, summary)
-                print(f"  [{i}/{total}] ✓ community {cid} summarized ({len(summary)} chars)")
                 results.append({"id": cid, "level": level, "summary": summary})
-                succeeded += 1
             except Exception as e:
-                print(f"  [{i}/{total}] ✗ community {cid} failed")
-                failed += 1
-
-        print(
-            f"Community summarization complete: graph_name={self.graph_name} level={level} "
-            f"succeeded={succeeded} skipped={skipped} failed={failed}"
-        )
+                print(f"  Error summarizing community {cid}: {e}")
         return results
 
     async def summarize_community(self, community_id: str, level: int = 0) -> str:

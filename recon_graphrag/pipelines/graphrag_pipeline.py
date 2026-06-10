@@ -231,8 +231,8 @@ class GraphBuilderPipeline:
                 print(f"  [{i}/{total}] ✗ chunk {chunk.id} failed")
 
         print(
-            f"Extraction complete: document_id={document_id} "
-            f"total={total} succeeded={len(chunk_extractions)} failed={len(extraction_errors)}"
+            f"Extraction complete: {len(chunk_extractions)}/{total} succeeded, "
+            f"{len(extraction_errors)}/{total} failed."
         )
 
         if chunks and not chunk_extractions:
@@ -251,14 +251,12 @@ class GraphBuilderPipeline:
             graph_name=self.graph_name,
         )
 
-        print(f"Writing graph document: document_id={document_id} chunks={len(chunks)}")
         write_stats = self.graph_writer.write_graph_document(graph_document)
         print(
-            f"Graph document written: document_id={document_id} "
-            f"documents={write_stats.get('documents')} chunks={write_stats.get('chunks')} "
-            f"entities={write_stats.get('entities')} relationships={write_stats.get('relationships')} "
-            f"evidence_links={write_stats.get('evidence_links')}"
+            f"Writing graph document to Neo4j "
+            f"({write_stats.get('entities')} entities, {write_stats.get('relationships')} relationships) ..."
         )
+        print(f"Write complete: {write_stats}")
 
         return {
             "document_id": document_id,

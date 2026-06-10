@@ -30,41 +30,24 @@ class CommunityEmbedder:
         Reads Community nodes with summaries but without embeddings,
         generates embeddings via the embedder, and batch-upserts them.
         """
-        print(f"Starting community embedding: graph_name={self.graph_name} level={level}")
         communities = self._get_communities_without_embeddings(level)
         if not communities:
-            print(f"All community summaries already embedded: graph_name={self.graph_name} level={level}")
+            print(f"  All communities at level {level} already have embeddings.")
             return
 
-        total = len(communities)
-        print(f"Embedding community summaries: graph_name={self.graph_name} level={level} count={total}")
-
         ids, embeddings = [], []
-        succeeded = 0
-        failed = 0
-
-        for i, comm in enumerate(communities, start=1):
-            cid = comm["community_id"]
-            print(f"[{i}/{total}] Embedding community {cid} ...")
+        for comm in communities:
             try:
                 text = self._community_to_text(comm)
                 embedding = await self.embedder.async_embed_query(text)
                 ids.append(comm["id"])
                 embeddings.append(embedding)
-                succeeded += 1
-                print(f"  [{i}/{total}] ✓ community {cid} embedded")
+                print(f"  Embedded community {comm['community_id']} level {comm['level']}")
             except Exception as e:
-                print(f"  [{i}/{total}] ✗ community {cid} failed")
-                failed += 1
+                print(f"  Error embedding community {comm['community_id']}: {e}")
 
         if ids:
-            print(f"Upserting community embeddings: count={len(ids)}")
             self.graph_store.upsert_vectors(ids, "embedding", embeddings)
-
-        print(
-            f"Community embedding complete: graph_name={self.graph_name} level={level} "
-            f"succeeded={succeeded} failed={failed}"
-        )
 
     async def embed_entities(self, batch_size: int = 500):
         """Generate embeddings for entities without embeddings.
@@ -73,26 +56,18 @@ class CommunityEmbedder:
         Concatenates label + name + description as the text to embed,
         then batch-upserts all embeddings at once.
         """
-        print(f"Starting entity embedding: graph_name={self.graph_name} batch_size={batch_size}")
         total = 0
-        batch_count = 0
-        total_failed = 0
 
         while True:
             entities = self._get_entities_without_embeddings(limit=batch_size)
             if not entities:
                 break
 
-            batch_count += 1
-            count_in_batch = len(entities)
-            print(f"Embedding entity batch: batch={batch_count} count={count_in_batch}")
-
             ids, embeddings = [], []
-            batch_failed = 0
 
             for entity in entities:
+                text = self._entity_to_text(entity)
                 try:
-                    text = self._entity_to_text(entity)
                     embedding = await self.embedder.async_embed_query(text)
                     ids.append(entity["id"])
                     embeddings.append(embedding)
@@ -100,23 +75,16 @@ class CommunityEmbedder:
                     name = self._value_to_text(
                         entity.get("name", entity.get("description", ""))
                     )
-                    print(f"Entity embedding failed: entity_id={entity.get('id')} name={name} error={e}")
-                    batch_failed += 1
+                    print(f"  Error embedding entity '{name}': {e}")
 
             if ids:
-                print(f"Upserting entity embeddings: batch={batch_count} count={len(ids)}")
                 self.graph_store.upsert_vectors(ids, "embedding", embeddings)
                 total += len(ids)
 
-            total_failed += batch_failed
-
-        if total == 0 and batch_count == 0:
-            print(f"All entities already have embeddings: graph_name={self.graph_name}")
+        if total == 0:
+            print("  All entities already have embeddings.")
         else:
-            print(
-                f"Entity embedding complete: graph_name={self.graph_name} "
-                f"embedded={total} failed={total_failed} batches={batch_count}"
-            )
+            print(f"  Embedded {total} entities.")
 
     def _get_communities_without_embeddings(self, level: int) -> list[dict]:
         query = """
