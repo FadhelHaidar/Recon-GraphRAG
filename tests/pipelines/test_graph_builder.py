@@ -34,7 +34,7 @@ class FakeGraphStore:
     def backfill_descriptions(self):
         pass
 
-    async def resolve_entities(self):
+    async def resolve_entities(self, **kwargs):
         return {"skipped": False, "merged_groups": 0}
 
     def get_unembedded_entities(self, limit=500):

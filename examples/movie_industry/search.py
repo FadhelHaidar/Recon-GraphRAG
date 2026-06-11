@@ -64,19 +64,252 @@ async def run_test_suite(test_queries: list):
                 print(f"\n>>> [{mode.upper()} ERROR]: {str(e)}")
 
 if __name__ == "__main__":
-    # Your dictionary list of test cases
+    # Graph RAG test cases for the movie industry corpus
     test_suite = [
         {
-            "query": "Which movies in the database were directed by Christopher Nolan and feature Cillian Murphy?",
-            "test_objective": "Verify 'DIRECTED' and 'ACTED_IN' relationship accuracy.",
+            "query": (
+                "Which movies were directed by Christopher Nolan and feature "
+                "Cillian Murphy?"
+            ),
+            "test_objective": (
+                "Verify DIRECTED and ACTED_IN relationships between Person and Movie."
+            ),
         },
         {
-            "query": "What are the most common themes across high-budget sci-fi films in this collection?",
-            "test_objective": "Assess community summary quality for the 'Sci-Fi' cluster.",
+            "query": (
+                "Which films did Hans Zimmer compose music for in this collection?"
+            ),
+            "test_objective": (
+                "Verify COMPOSED_MUSIC relationships and composer-to-movie extraction."
+            ),
         },
         {
-            "query": "How does the work of Hans Zimmer connect the movie Inception to the movie Dune?",
-            "test_objective": "Test pathfinding between two different directors via a shared technical node.",
+            "query": (
+                "Which movies were shot by Hoyte van Hoytema?"
+            ),
+            "test_objective": (
+                "Verify SHOT_BY relationships for cinematographer-to-movie links."
+            ),
+        },
+        {
+            "query": (
+                "How does Hans Zimmer connect Inception to Dune?"
+            ),
+            "test_objective": (
+                "Test multi-hop traversal from Movie to Person to Movie using "
+                "COMPOSED_MUSIC relationships."
+            ),
+        },
+        {
+            "query": (
+                "Find the connection path between Interstellar and Dune."
+            ),
+            "test_objective": (
+                "Test whether the graph can connect movies through shared actors, "
+                "composer, genre, and sci-fi themes."
+            ),
+        },
+        {
+            "query": (
+                "How is Cillian Murphy connected to Michelle Yeoh?"
+            ),
+            "test_objective": (
+                "Test cross-film pathfinding through Sunshine, Oppenheimer, "
+                "Everything Everywhere All At Once, and actor bridges."
+            ),
+        },
+        {
+            "query": (
+                "How are Inception, The Revenant, and Birdman connected?"
+            ),
+            "test_objective": (
+                "Test multi-hop traversal through Leonardo DiCaprio, Tom Hardy, "
+                "Alejandro G. Inarritu, and award relationships."
+            ),
+        },
+        {
+            "query": (
+                "Which characters were played by actors in Christopher Nolan films?"
+            ),
+            "test_objective": (
+                "Verify PLAYED_CHARACTER extraction and connections between Person, "
+                "Character, and Movie context."
+            ),
+        },
+        {
+            "query": (
+                "How does Tom Hardy connect Nolan films to non-Nolan films?"
+            ),
+            "test_objective": (
+                "Test actor bridge reasoning across Inception, The Dark Knight Rises, "
+                "The Revenant, and Peaky Blinders."
+            ),
+        },
+        {
+            "query": (
+                "Which actors create bridges between Nolan films and other directors' films?"
+            ),
+            "test_objective": (
+                "Evaluate whether local and DRIFT retrieval can identify bridge actors "
+                "such as Tom Hardy, Leonardo DiCaprio, Cillian Murphy, Anne Hathaway, "
+                "and Timothee Chalamet."
+            ),
+        },
+        {
+            "query": (
+                "Which movies in this corpus won the Oscar for Best Picture?"
+            ),
+            "test_objective": (
+                "Verify WON_AWARD relationship extraction for Movie to Award."
+            ),
+        },
+        {
+            "query": (
+                "How are Parasite, Everything Everywhere All At Once, Birdman, "
+                "and Oppenheimer connected through awards?"
+            ),
+            "test_objective": (
+                "Test global community retrieval over shared award relationships."
+            ),
+        },
+        {
+            "query": (
+                "How does Parasite connect to 1917?"
+            ),
+            "test_objective": (
+                "Verify award competition reasoning using WON_AWARD and NOMINATED_FOR "
+                "relationships."
+            ),
+        },
+        {
+            "query": (
+                "Which movies explore time, memory, or moral responsibility?"
+            ),
+            "test_objective": (
+                "Test EXPLORES relationships and semantic retrieval over Theme nodes."
+            ),
+        },
+        {
+            "query": (
+                "What themes connect Interstellar, Inception, Dunkirk, and Oppenheimer?"
+            ),
+            "test_objective": (
+                "Assess global and DRIFT retrieval over Nolan-related thematic clusters."
+            ),
+        },
+        {
+            "query": (
+                "Which films in the corpus explore class inequality or social conflict?"
+            ),
+            "test_objective": (
+                "Verify Theme extraction for Parasite, Oppenheimer, and other "
+                "social-conflict-related films."
+            ),
+        },
+        {
+            "query": (
+                "Which films are connected through IMAX cinematography?"
+            ),
+            "test_objective": (
+                "Verify USES_TECHNIQUE relationships and retrieval over Technique nodes."
+            ),
+        },
+        {
+            "query": (
+                "How are Nolan and Villeneuve connected through large-format filmmaking?"
+            ),
+            "test_objective": (
+                "Test semantic traversal across directors, cinematographers, movies, "
+                "and Technique nodes."
+            ),
+        },
+        {
+            "query": (
+                "Which films use Shepard tones or sound design to create tension?"
+            ),
+            "test_objective": (
+                "Verify extraction of musical and sound-related Technique nodes."
+            ),
+        },
+        {
+            "query": (
+                "Which movies are connected to Warner Bros, A24, or Universal Pictures?"
+            ),
+            "test_objective": (
+                "Verify PRODUCED and DISTRIBUTED relationships involving Studio nodes."
+            ),
+        },
+        {
+            "query": (
+                "How did Christopher Nolan's studio relationships change from "
+                "Warner Bros to Universal Pictures?"
+            ),
+            "test_objective": (
+                "Test studio-level reasoning over Nolan movies and Studio relationships."
+            ),
+        },
+        {
+            "query": (
+                "Which movies belong to or are connected with major franchises or series?"
+            ),
+            "test_objective": (
+                "Verify BELONGS_TO relationships for The Dark Knight trilogy, "
+                "Dune series, and Marvel Cinematic Universe references."
+            ),
+        },
+        {
+            "query": (
+                "What are the major communities or clusters in this movie graph?"
+            ),
+            "test_objective": (
+                "Assess global search quality using community summaries."
+            ),
+        },
+        {
+            "query": (
+                "Summarize the Nolan-related community in this graph."
+            ),
+            "test_objective": (
+                "Test whether global retrieval can summarize the Nolan subgraph involving "
+                "movies, actors, composer, cinematographer, studio, and themes."
+            ),
+        },
+        {
+            "query": (
+                "Summarize the Oscar-winning film community in this graph."
+            ),
+            "test_objective": (
+                "Test community detection around Best Picture winners and award links."
+            ),
+        },
+        {
+            "query": (
+                "Compare the connections of Parasite and Oppenheimer in the graph."
+            ),
+            "test_objective": (
+                "Test comparative reasoning across themes, awards, directors, and "
+                "historical or social context."
+            ),
+        },
+        {
+            "query": (
+                "Compare the sci-fi network around Interstellar, Dune, Sunshine, "
+                "and Everything Everywhere All At Once."
+            ),
+            "test_objective": (
+                "Test cross-community retrieval across sci-fi movies, actors, studios, "
+                "themes, and composers."
+            ),
+        },
+        {
+            "query": (
+                "Which people are the most important bridge nodes in this graph?"
+            ),
+            "test_objective": (
+                "Evaluate whether the system can identify central connecting people "
+                "such as Christopher Nolan, Hans Zimmer, Cillian Murphy, Tom Hardy, "
+                "Leonardo DiCaprio, and Michelle Yeoh."
+            ),
         },
     ]
 

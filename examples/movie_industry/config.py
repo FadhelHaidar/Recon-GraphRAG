@@ -29,10 +29,11 @@ def get_llm():
 
     # Option 2: Azure OpenAI
     return create_llm(
-        "openai",
+        "azure_openai",
         model_name=os.getenv("AZURE_OPENAI_LLM_DEPLOYMENT_NAME", "gpt-4o"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        base_url=os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01"),
     )
 
     # Option 3: Custom OpenAI-compatible
@@ -59,8 +60,9 @@ def get_embedder():
 
     # Option 3: Azure OpenAI
     return create_embedder(
-        "openai",
+        "azure_openai",
         model=os.getenv("AZURE_OPENAI_EMBED_MODEL_DEPLOYMENT_NAME", "text-embedding-3-small"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        base_url=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01"),
     )

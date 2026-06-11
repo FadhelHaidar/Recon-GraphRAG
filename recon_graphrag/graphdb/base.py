@@ -6,7 +6,7 @@ plus GraphWriter protocol for write operations.
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from recon_graphrag.extraction.types import GraphDocument
 from recon_graphrag.models.types import IndexConfig
@@ -54,7 +54,21 @@ class GraphStore(Protocol):
     # ------------------------------------------------------------------
     # Entity resolution
     # ------------------------------------------------------------------
-    async def resolve_entities(self, resolve_property: str = "name") -> dict:
+    async def resolve_entities(
+        self,
+        graph_name: str = "entity-graph",
+        strategy: str = "normalized",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+        aliases: Optional[dict] = None,
+        embedder: Optional[Any] = None,
+        llm: Optional[Any] = None,
+        llm_guidance: Optional[str] = None,
+        allow_ai_auto_merge: bool = False,
+    ) -> dict:
         """Merge duplicate entity nodes when possible."""
         ...
 

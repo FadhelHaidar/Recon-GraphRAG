@@ -28,7 +28,7 @@ from recon_graphrag import (
 )
 
 
-RUN_FLAG = "RUN_MOVIE_EXAMPLE_SMOKE_TESTS"
+RUN_FLAG = "RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS"
 GRAPH_NAME = "movie-smoke"
 REQUIRED_ENV = [
     "AZURE_OPENAI_ENDPOINT",
@@ -45,7 +45,7 @@ def _env_or_skip() -> None:
     load_dotenv()
 
     if os.getenv(RUN_FLAG, "").lower() not in {"1", "true", "yes"}:
-        pytest.skip(f"Set {RUN_FLAG}=1 to run the movie example smoke test.")
+        pytest.skip(f"Set {RUN_FLAG}=1 to run the Neo4j movie example smoke test.")
 
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:

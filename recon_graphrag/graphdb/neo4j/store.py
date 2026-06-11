@@ -67,13 +67,40 @@ class Neo4jGraphStore:
     # ------------------------------------------------------------------
     # Entity resolution
     # ------------------------------------------------------------------
-    async def resolve_entities(self, resolve_property: str = "name") -> dict:
-        from recon_graphrag.graphdb.neo4j.index_manager import (
-            ExactMatchEntityResolver,
+    async def resolve_entities(
+        self,
+        graph_name: str = "entity-graph",
+        strategy: str = "normalized",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+        aliases: Optional[dict] = None,
+        embedder=None,
+        llm=None,
+        llm_guidance: Optional[str] = None,
+        allow_ai_auto_merge: bool = False,
+    ) -> dict:
+        from recon_graphrag.graphdb.neo4j.entity_resolution import (
+            _Neo4jEntityResolver,
         )
 
-        resolver = ExactMatchEntityResolver(self, resolve_property=resolve_property)
-        return await resolver.run()
+        resolver = _Neo4jEntityResolver(self)
+        return await resolver.resolve(
+            graph_name=graph_name,
+            strategy=strategy,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+            aliases=aliases,
+            embedder=embedder,
+            llm=llm,
+            llm_guidance=llm_guidance,
+            allow_ai_auto_merge=allow_ai_auto_merge,
+        )
 
     # ------------------------------------------------------------------
     # Embeddings

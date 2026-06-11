@@ -38,6 +38,7 @@ class GraphBuilderPipeline:
         graph_name: str = "entity-graph",
         graph_writer: Optional[GraphWriter] = None,
         perform_entity_resolution: bool = True,
+        entity_resolution_strategy: str = "normalized",
         embed_entities: bool = True,
         fail_on_resolution_error: bool = False,
         fail_on_embedding_error: bool = False,
@@ -50,6 +51,7 @@ class GraphBuilderPipeline:
         self.chunk_overlap = chunk_overlap
         self.graph_name = graph_name
         self.perform_entity_resolution = perform_entity_resolution
+        self.entity_resolution_strategy = entity_resolution_strategy
         self.embed_entity_nodes = embed_entities
         self.fail_on_resolution_error = fail_on_resolution_error
         self.fail_on_embedding_error = fail_on_embedding_error
@@ -281,7 +283,10 @@ class GraphBuilderPipeline:
     async def _resolve_entities(self):
         """Step 2: Merge duplicate entities with the internal resolver."""
         try:
-            result = await self.graph_store.resolve_entities()
+            result = await self.graph_store.resolve_entities(
+                graph_name=self.graph_name,
+                strategy=self.entity_resolution_strategy,
+            )
             if isinstance(result, dict) and result.get("skipped"):
                 print(f"Entity resolution skipped: reason={result.get('reason')}")
         except Exception as e:
