@@ -165,3 +165,9 @@ Document the convention clearly in:
 - global search examples
 
 This avoids breaking existing graph data while making query intent clearer.
+
+## See also
+
+- [README](../README.md) — project overview and quick start
+- [Search](search.md) — how to use community levels in local, global, and DRIFT search
+- [Pipelines](pipelines.md) — how communities are built
