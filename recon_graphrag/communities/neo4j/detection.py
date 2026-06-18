@@ -85,11 +85,6 @@ class CommunityDetector:
         """Escape labels, relationship types, and property names for Cypher."""
         return "`" + identifier.replace("`", "``") + "`"
 
-    @staticmethod
-    def _cypher_string_literal(value: str) -> str:
-        """Safely create a Cypher string literal."""
-        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
     def _cleanup_communities(self):
         community_label = self._escape_cypher_identifier(self.community_label)
         query = f"""
@@ -115,6 +110,20 @@ class CommunityDetector:
 
         valid_types = self._get_valid_relationship_types()
 
+        if self.relationship_weight_property:
+            escaped_weight = self._escape_cypher_identifier(
+                self.relationship_weight_property
+            )
+            relationship_config = f"""{{
+                relationshipType: type(r),
+                relationshipProperties: apoc.map.fromLists(
+                    [$relationship_weight_property],
+                    [coalesce(r.{escaped_weight}, 1.0)]
+                )
+            }}"""
+        else:
+            relationship_config = "{relationshipType: type(r)}"
+
         query = f"""
         MATCH (source:{entity_label} {{graph_name: $graph_name}})-[r]-(target:{entity_label} {{graph_name: $graph_name}})
         WHERE r.graph_name = $graph_name
@@ -123,20 +132,21 @@ class CommunityDetector:
             $graph_name,
             source,
             target,
-            {{relationshipType: type(r)}},
+            {relationship_config},
             {{undirectedRelationshipTypes: $relationship_types}}
         ) AS g
         RETURN g.graphName AS graphName,
                g.nodeCount AS nodeCount,
                g.relationshipCount AS relationshipCount
         """
-        result = self.graph_store.execute_query(
-            query,
-            {
-                "graph_name": self.graph_name,
-                "relationship_types": valid_types,
-            },
-        )
+        params = {
+            "graph_name": self.graph_name,
+            "relationship_types": valid_types,
+        }
+        if self.relationship_weight_property:
+            params["relationship_weight_property"] = self.relationship_weight_property
+
+        result = self.graph_store.execute_query(query, params)
 
         if not result or result[0]["relationshipCount"] == 0:
             raise RuntimeError(
@@ -171,34 +181,6 @@ class CommunityDetector:
             )
 
         return valid_types
-
-    def _build_relationship_projection(self, relationship_types: list[str]) -> str:
-        parts = []
-        for rel_type in relationship_types:
-            escaped_rel_type = self._escape_cypher_identifier(rel_type)
-            if self.relationship_weight_property:
-                escaped_weight = self._escape_cypher_identifier(
-                    self.relationship_weight_property
-                )
-                weight_literal = self._cypher_string_literal(
-                    self.relationship_weight_property
-                )
-                parts.append(
-                    f"""
-                    {escaped_rel_type}: {{
-                        orientation: 'UNDIRECTED',
-                        properties: {{
-                            {escaped_weight}: {{
-                                property: {weight_literal},
-                                defaultValue: 1.0
-                            }}
-                        }}
-                    }}
-                    """
-                )
-            else:
-                parts.append(f"{escaped_rel_type}: {{orientation: 'UNDIRECTED'}}")
-        return ", ".join(parts)
 
     def _drop_projection(self):
         self.graph_store.execute_query(

@@ -7,21 +7,10 @@
 
 * llm entity resolution  ([5fa5cdd](https://github.com/FadhelHaidar/recon-graphrag/commit/5fa5cddfd8059cc664770a3885b4d696878c6c6b))
 
-## [0.2.2](https://github.com/FadhelHaidar/recon-graphrag/compare/v0.2.1...v0.2.2) (2026-06-18)
-
-### Bug Fixes
-
-* wire hybrid entity-resolution LLM review into opt-in auto-merge behavior
-
-### Documentation
-
-* document hybrid entity-resolution auto-merge and example ingest flags
+## [0.2.1](https://github.com/FadhelHaidar/recon-graphrag/compare/v0.2.0...v0.2.1) (2026-06-17)
 
 
-## [0.2.1](https://github.com/FadhelHaidar/recon-graphrag/compare/v1.0.0...v0.2.1) (2026-06-17)
-
-
-### ⚠ BREAKING CHANGES
+### BREAKING CHANGES
 
 * FalkorDB backend support and related extras/env vars/tests are removed in favor of Memgraph.
 

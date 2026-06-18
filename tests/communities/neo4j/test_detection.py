@@ -45,3 +45,49 @@ def test_projection_is_scoped_by_graph_name():
         "graph_name": "movie-graph",
         "relationship_types": ["ACTED_IN"],
     }
+
+
+def test_weighted_projection_includes_relationship_weight_property():
+    store = FakeGraphStore()
+    detector = CommunityDetector(
+        store,
+        relationship_types=["ACTED_IN", "DIRECTED"],
+        graph_name="movie-graph",
+        relationship_weight_property="weight",
+    )
+
+    detector._project_graph()
+
+    projection_query = store.queries[2]
+    params = store.params[2]
+
+    assert "relationshipProperties" in projection_query
+    assert "apoc.map.fromLists" in projection_query
+    assert "$relationship_weight_property" in projection_query
+    assert "r.`weight`" in projection_query
+    assert params == {
+        "graph_name": "movie-graph",
+        "relationship_types": ["ACTED_IN"],
+        "relationship_weight_property": "weight",
+    }
+
+
+def test_unweighted_projection_omits_relationship_properties():
+    store = FakeGraphStore()
+    detector = CommunityDetector(
+        store,
+        relationship_types=["ACTED_IN", "DIRECTED"],
+        graph_name="movie-graph",
+    )
+
+    detector._project_graph()
+
+    projection_query = store.queries[2]
+    params = store.params[2]
+
+    assert "relationshipProperties" not in projection_query
+    assert "apoc.map.fromLists" not in projection_query
+    assert params == {
+        "graph_name": "movie-graph",
+        "relationship_types": ["ACTED_IN"],
+    }

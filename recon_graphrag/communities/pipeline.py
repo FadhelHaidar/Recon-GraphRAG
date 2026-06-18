@@ -34,6 +34,24 @@ class CommunityPipeline:
         random_seed: Optional[int] = 42,
         summary_prompt: Optional[str] = None,
     ):
+        """Initialize the community pipeline.
+
+        Args:
+            graph_store: Store that provides community detection and persistence.
+            llm: LLM used to summarize detected communities.
+            embedder: Embedder used for community summary embeddings.
+            relationship_types: Relationship types to include in the detection graph.
+            max_levels: Maximum number of community hierarchy levels to detect.
+            gamma: Leiden resolution parameter.
+            theta: Leiden theta parameter.
+            tolerance: Leiden tolerance parameter.
+            graph_name: Graph scope to detect communities within.
+            relationship_weight_property: Name of the numeric relationship property
+                to use as the Leiden edge weight, e.g. "weight". Neo4j runs
+                unweighted when this is None; Memgraph defaults to "weight".
+            random_seed: Random seed for deterministic Neo4j community detection.
+            summary_prompt: Optional custom prompt for community summaries.
+        """
         self.graph_store = graph_store
         self.llm = llm
         self.embedder = embedder

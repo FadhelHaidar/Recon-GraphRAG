@@ -186,6 +186,20 @@ RUN_NEO4J_ENTITY_RESOLUTION_AI_TESTS=1 \
 pytest tests/integration/neo4j/test_entity_resolution_integration.py
 ```
 
+### Neo4j community detection
+
+```bash
+RUN_NEO4J_COMMUNITY_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_community_detection_integration.py
+```
+
+Required environment variables:
+
+```text
+NEO4J_URL
+NEO4J_USERNAME
+NEO4J_PASSWORD
+```
+
 ### Neo4j movie example smoke test
 
 ```bash

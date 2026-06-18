@@ -33,6 +33,10 @@ Rules:
 7. Prefer IDs in this format: "<label>:<normalized-name>".
 8. Return valid JSON only. Do not include markdown.
 9. If there are no valid nodes or relationships, return empty arrays.
+10. Every relationship should include a numeric "weight" property. Use 1.0
+    for a normal explicit relationship, higher values for unusually strong
+    or repeatedly supported relationships, and lower positive values for weak
+    but explicit relationships.
 
 JSON format:
 {{
@@ -51,7 +55,8 @@ JSON format:
       "target_id": "movie:example",
       "type": "ACTED_IN",
       "properties": {{
-        "description": "The text states that Example acted in Example."
+        "description": "The text states that Example acted in Example.",
+        "weight": 1.0
       }}
     }}
   ]
