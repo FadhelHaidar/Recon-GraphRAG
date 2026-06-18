@@ -40,3 +40,5 @@ def test_prompt_includes_labels_and_patterns():
     assert "Person -[DIRECTED]-> Movie" in prompt
     assert "Christopher Nolan directed Inception." in prompt
     assert "Return valid JSON only" in prompt
+    assert 'numeric "weight" property' in prompt
+    assert '"weight": 1.0' in prompt

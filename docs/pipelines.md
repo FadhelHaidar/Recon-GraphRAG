@@ -112,6 +112,7 @@ community = CommunityPipeline(
     max_levels=3,               # hierarchy depth (default: 3)
     gamma=1.0,                  # Leiden resolution (default: 1.0)
     theta=0.01,                 # Leiden tolerance (default: 0.01)
+    relationship_weight_property="weight",  # numeric edge weight property
     summary_prompt=None,        # custom summary prompt (uses default if None)
 )
 ```
@@ -141,6 +142,7 @@ result = await community.build(level=0)
 | `max_levels` | Maximum number of community hierarchy levels to detect. |
 | `gamma` | Leiden resolution parameter. Higher values produce more communities. |
 | `theta` | Leiden tolerance parameter. |
+| `relationship_weight_property` | Name of the numeric relationship property to use as the Leiden edge weight, for example `"weight"`. Neo4j runs unweighted when this is omitted; Memgraph defaults to `"weight"`. |
 | `summary_prompt` | Optional custom prompt for generating community summaries. |
 
 ### Choosing `relationship_types`

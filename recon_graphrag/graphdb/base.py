@@ -169,7 +169,11 @@ class GraphStore(Protocol):
         entity_label: str = "__Entity__",
         community_label: str = "Community",
     ) -> list[dict]:
-        """Run community detection and return community stats."""
+        """Run community detection and return community stats.
+
+        relationship_weight_property is the name of a numeric relationship
+        property to use as the Leiden edge weight, e.g. "weight".
+        """
         ...
 
     def get_communities(
