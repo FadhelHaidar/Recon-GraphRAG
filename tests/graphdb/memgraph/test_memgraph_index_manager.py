@@ -1,8 +1,6 @@
-"""Tests for Memgraph index manager."""
+"""Tests for the Memgraph index manager."""
 
 from __future__ import annotations
-
-import pytest
 
 from recon_graphrag.graphdb.memgraph.index_manager import IndexManager
 

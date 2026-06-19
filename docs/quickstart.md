@@ -6,25 +6,42 @@ This guide walks you through building and searching your first knowledge graph w
 
 You need:
 
-1. A running Neo4j instance with APOC and GDS plugins.
+1. A running Neo4j instance with APOC/GDS or Memgraph instance with MAGE.
 2. Recon-GraphRAG installed from GitHub.
 
 See [Installation](installation.md) if you have not set these up yet.
 
-## 1. Connect to Neo4j
+## 1. Connect to a graph database
 
-Create a Neo4j driver and wrap it in a `Neo4jGraphStore`:
+Both backends use the Bolt-compatible `GraphDatabase` driver. Choose the matching store and index manager.
+
+### Neo4j
 
 ```python
 from neo4j import GraphDatabase
-from recon_graphrag import Neo4jGraphStore
+from recon_graphrag import IndexManager, Neo4jGraphStore
 
 driver = GraphDatabase.driver(
-    "bolt://localhost:7687",
+    "bolt://localhost:7688",
     auth=("neo4j", "password")
 )
 
 store = Neo4jGraphStore(driver)
+index_manager_cls = IndexManager
+```
+
+### Memgraph
+
+```python
+from neo4j import GraphDatabase
+from recon_graphrag import MemgraphGraphStore
+from recon_graphrag.graphdb.memgraph.index_manager import (
+    IndexManager as MemgraphIndexManager,
+)
+
+driver = GraphDatabase.driver("bolt://localhost:7689")
+store = MemgraphGraphStore(driver)
+index_manager_cls = MemgraphIndexManager
 ```
 
 ## 2. Create indexes
@@ -32,9 +49,7 @@ store = Neo4jGraphStore(driver)
 `IndexManager` creates the vector and fulltext indexes required by the retrievers. Run this once after setting up the store.
 
 ```python
-from recon_graphrag import IndexManager
-
-manager = IndexManager(store, embedding_dim=1536)
+manager = index_manager_cls(store, embedding_dim=1536)
 manager.create_indexes()
 ```
 
@@ -181,7 +196,7 @@ drift_result = await graph_rag.search(
 
 > **Note on community levels:** In Recon-GraphRAG, `level=0` means the **finest / most local** communities. This is the opposite of some Microsoft GraphRAG descriptions. See [Search](search.md) for details.
 
-## Complete example
+## Complete Neo4j example
 
 Here is the full script in one block:
 
@@ -199,7 +214,7 @@ from recon_graphrag import (
 from recon_graphrag.extraction.schema import GraphSchema, NodeType, PropertyType, RelationshipType
 
 # Connect
-driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "password"))
+driver = GraphDatabase.driver("bolt://localhost:7688", auth=("neo4j", "password"))
 store = Neo4jGraphStore(driver)
 
 # Indexes
@@ -247,6 +262,8 @@ graph_rag = GraphRAG(store, llm, embedder)
 result = await graph_rag.search("What are the key findings?", mode="local")
 print(result.answer)
 ```
+
+To run the complete example on Memgraph, replace the connection and manager setup with the Memgraph snippet from step 1. The schema, providers, pipelines, and search calls remain unchanged.
 
 ## Next steps
 

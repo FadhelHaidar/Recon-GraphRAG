@@ -17,7 +17,7 @@ If you find a bug, please open a GitHub issue and include:
 - A clear description of the problem.
 - Steps to reproduce it.
 - The expected behavior and the actual behavior.
-- Your Python version, Neo4j version, and Recon-GraphRAG version.
+- Your Python, Recon-GraphRAG, and graph database versions (Neo4j or Memgraph).
 - Relevant code snippets or error messages.
 
 ### Request features
@@ -55,10 +55,11 @@ For questions, troubleshooting help, or general discussion, use GitHub Discussio
    pip install -e ".[all,dev]"
    ```
 
-3. Start Neo4j with APOC and GDS:
+3. Start the database needed for your change (Neo4j with APOC/GDS, Memgraph with MAGE, or both):
 
    ```bash
-   docker-compose up -d
+   docker-compose up -d neo4j
+   docker-compose up -d memgraph lab
    ```
 
 4. Copy the environment file and fill in any values needed for tests:

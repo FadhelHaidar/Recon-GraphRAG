@@ -5,7 +5,6 @@ import json
 import pytest
 
 from recon_graphrag.extraction.parser import GraphExtractionParser
-from recon_graphrag.extraction.types import ExtractedNode, ExtractedRelationship
 
 
 def test_parse_valid_json():

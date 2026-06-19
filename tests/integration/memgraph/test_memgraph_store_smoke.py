@@ -1,0 +1,48 @@
+"""Integration smoke test for the Memgraph backend.
+
+Requires a running Memgraph instance with MAGE and opt-in via the environment.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from examples.config import get_memgraph_store
+from tests.integration.database_scenarios import (
+    assert_graph_document_write,
+    cleanup_graph,
+)
+from tests.integration.support import require_integration_env
+
+RUN_FLAG = "RUN_MEMGRAPH_INTEGRATION_TESTS"
+REQUIRED_ENV = ["MEMGRAPH_URL"]
+GRAPH_NAME = "memgraph-store-smoke"
+
+
+def _memgraph_env_or_skip() -> None:
+    require_integration_env(
+        RUN_FLAG,
+        REQUIRED_ENV,
+        "Memgraph store integration tests",
+        fail_on_missing=True,
+    )
+
+
+@pytest.fixture
+def memgraph_store():
+    _memgraph_env_or_skip()
+
+    store = get_memgraph_store()
+    cleanup_graph(store, GRAPH_NAME)
+    try:
+        yield store
+    finally:
+        try:
+            cleanup_graph(store, GRAPH_NAME)
+        finally:
+            store.driver.close()
+
+
+@pytest.mark.integration
+def test_memgraph_writes_graph_document_and_reports_counts(memgraph_store):
+    assert_graph_document_write(memgraph_store, GRAPH_NAME)

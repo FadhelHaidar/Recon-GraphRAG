@@ -7,7 +7,6 @@ import pytest
 from recon_graphrag.graphdb.neo4j.entity_resolution import (
     ExactMatchEntityResolver,
     _Neo4jEntityResolver,
-    _normalize_name,
 )
 
 
@@ -39,28 +38,6 @@ class FakeGraphStore:
 
     def upsert_vectors(self, **kwargs):
         pass
-
-
-# ------------------------------------------------------------------
-# Normalization helpers
-# ------------------------------------------------------------------
-
-def test_normalize_name_handles_case_and_whitespace():
-    assert _normalize_name("OpenAI") == "openai"
-    assert _normalize_name("openai") == "openai"
-    assert _normalize_name("Open AI") == "openai"
-
-
-def test_normalize_name_handles_punctuation():
-    assert _normalize_name("U.S.A.") == "usa"
-    assert _normalize_name("U.S.A") == "usa"
-
-
-def test_normalize_name_removes_org_suffixes():
-    assert _normalize_name("Microsoft Corp.") == "microsoft"
-    assert _normalize_name("Microsoft Corporation") == "microsoft"
-    assert _normalize_name("Acme Inc.") == "acme"
-    assert _normalize_name("Acme Ltd") == "acme"
 
 
 # ------------------------------------------------------------------

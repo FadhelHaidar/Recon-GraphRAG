@@ -157,3 +157,16 @@ def test_random_seed_is_not_forwarded_to_mage():
 
     leiden_query = next(q for q, _ in store.queries if "leiden_community_detection" in q)
     assert "seed" not in leiden_query.lower()
+
+
+def test_detection_queries_are_scoped_by_graph_name():
+    store = FakeGraphStore()
+    detector = CommunityDetector(store, graph_name="scoped-graph")
+
+    detector.detect()
+
+    scoped_calls = [
+        params for query, params in store.queries if "$graph_name" in query
+    ]
+    assert scoped_calls
+    assert all(params["graph_name"] == "scoped-graph" for params in scoped_calls)

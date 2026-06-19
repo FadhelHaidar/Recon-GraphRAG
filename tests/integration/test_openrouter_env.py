@@ -1,10 +1,8 @@
 import math
-import os
-
 import pytest
-from dotenv import load_dotenv
 
 from recon_graphrag import create_embedder, create_llm
+from tests.integration.support import require_integration_env
 
 
 RUN_FLAG = "RUN_OPENROUTER_INTEGRATION_TESTS"
@@ -16,14 +14,9 @@ REQUIRED_ENV = [
 
 
 def _openrouter_env_or_skip():
-    load_dotenv()
+    import os
 
-    if os.getenv(RUN_FLAG, "").lower() not in {"1", "true", "yes"}:
-        pytest.skip(f"Set {RUN_FLAG}=1 to call the real OpenRouter endpoint.")
-
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        pytest.skip(f"Missing required OpenRouter env vars: {', '.join(missing)}")
+    require_integration_env(RUN_FLAG, REQUIRED_ENV, "OpenRouter integration tests")
 
     return {
         "api_key": os.environ["OPENROUTER_API_KEY"],

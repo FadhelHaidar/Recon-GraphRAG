@@ -9,7 +9,7 @@ Recon-GraphRAG splits indexing into two pipelines: one that builds the entity gr
 | **Graph Building** | `GraphBuilderPipeline` | 1. Extract entities & relationships via LLM |
 | | | 2. Entity resolution (merge duplicates) |
 | | | 3. Entity embedding |
-| **Community Building** | `CommunityPipeline` | 4. Community detection (GDS Leiden) |
+| **Community Building** | `CommunityPipeline` | 4. Community detection (Neo4j GDS or Memgraph MAGE Leiden) |
 | | | 5. Community summarization (LLM) |
 | | | 6. Community embedding |
 
@@ -73,7 +73,7 @@ result = await pipeline.build_from_documents(documents)
 
 | Parameter | Description |
 | --------- | --------- |
-| `graph_store` | A `GraphStore` implementation, usually `Neo4jGraphStore`. |
+| `graph_store` | A `GraphStore` implementation such as `Neo4jGraphStore` or `MemgraphGraphStore`. |
 | `llm` | An LLM instance from `create_llm()`. |
 | `embedder` | An embedder instance from `create_embedder()`. |
 | `schema` | A `GraphSchema` defining entities, relationships, and patterns. |
@@ -99,7 +99,7 @@ threshold.
 
 ## CommunityPipeline
 
-`CommunityPipeline` detects hierarchical communities using the GDS Leiden algorithm, summarizes each community with an LLM, and embeds the summaries.
+`CommunityPipeline` detects hierarchical communities using Neo4j GDS or Memgraph MAGE Leiden, summarizes each community with an LLM, and embeds the summaries.
 
 ```python
 from recon_graphrag import CommunityPipeline
@@ -135,7 +135,7 @@ result = await community.build(level=0)
 
 | Parameter | Description |
 | --------- | --------- |
-| `graph_store` | A `GraphStore` implementation, usually `Neo4jGraphStore`. |
+| `graph_store` | A `GraphStore` implementation such as `Neo4jGraphStore` or `MemgraphGraphStore`. |
 | `llm` | An LLM instance from `create_llm()`. |
 | `embedder` | An embedder instance from `create_embedder()`. |
 | `relationship_types` | Which relationship types form the community graph. **Required.** |

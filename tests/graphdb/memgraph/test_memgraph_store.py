@@ -86,9 +86,7 @@ def test_write_graph_document_delegates_to_writer(store, fake_driver):
     from recon_graphrag.extraction.types import (
         ChunkRecord,
         DocumentRecord,
-        EvidenceLink,
         GraphDocument,
-        RelationshipRecord,
     )
 
     document = DocumentRecord(
@@ -159,6 +157,11 @@ def test_upsert_vectors_runs_unwind_set(store, fake_driver):
     query_text = "\n".join(fake_driver.session_obj.queries)
     assert "UNWIND $rows" in query_text
     assert "SET n.`embedding` = row.vector" in query_text
+
+
+def test_upsert_vectors_rejects_mismatched_lengths(store):
+    with pytest.raises(ValueError):
+        store.upsert_vectors([1], "embedding", [])
 
 
 def test_vector_search_runs_vector_procedure(store, fake_driver):

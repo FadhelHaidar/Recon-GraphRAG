@@ -6,8 +6,9 @@ from recon_graphrag.graphdb.neo4j.store import Neo4jGraphStore
 
 
 class FakeSession:
-    def __init__(self, calls):
+    def __init__(self, calls, records):
         self.calls = calls
+        self.records = records
 
     def __enter__(self):
         return self
@@ -17,16 +18,27 @@ class FakeSession:
 
     def run(self, query, parameters=None):
         self.calls.append((query.strip(), parameters or {}))
-        return []
+        return self.records
 
 
 class FakeDriver:
     def __init__(self):
         self.calls = []
+        self.records = []
 
     def session(self, **kwargs):
         self.session_kwargs = kwargs
-        return FakeSession(self.calls)
+        return FakeSession(self.calls, self.records)
+
+
+def test_execute_query_translates_records():
+    driver = FakeDriver()
+    driver.records = [{"cnt": 42}]
+    store = Neo4jGraphStore(driver)
+
+    result = store.execute_query("MATCH (n) RETURN count(n) AS cnt")
+
+    assert result == [{"cnt": 42}]
 
 
 def test_create_vector_index_executes_direct_cypher_with_escaped_identifiers():
@@ -90,3 +102,85 @@ def test_upsert_vectors_rejects_mismatched_lengths():
 
     with pytest.raises(ValueError):
         store.upsert_vectors(["4:a"], "embedding", [])
+
+
+def test_vector_search_runs_vector_procedure_with_label_filter():
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver)
+
+    store.vector_search(
+        index_name="entity-embeddings",
+        query_vector=[0.1, 0.2],
+        k=5,
+        label="__Entity__",
+    )
+
+    query, params = driver.calls[-1]
+    assert "db.index.vector.queryNodes" in query
+    assert "WHERE node:`__Entity__`" in query
+    assert params["k"] == 5
+    assert params["top_k"] == 5
+
+
+def test_keyword_search_runs_fulltext_procedure_with_label_filter():
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver)
+
+    store.keyword_search(
+        index_name="entity-names",
+        query_text="Alice",
+        k=5,
+        label="__Entity__",
+    )
+
+    query, params = driver.calls[-1]
+    assert "db.index.fulltext.queryNodes" in query
+    assert "WHERE node:`__Entity__`" in query
+    assert params["query_text"] == "Alice"
+
+
+def test_search_communities_overfetches_before_filtering():
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver)
+
+    store.search_communities(
+        index_name="community-embeddings",
+        query_vector=[0.1, 0.2],
+        graph_name="entity-graph",
+        top_k=3,
+        level=1,
+    )
+
+    _, params = driver.calls[-1]
+    assert params["k"] == 15
+    assert params["top_k"] == 3
+    assert params["graph_name"] == "entity-graph"
+    assert params["level"] == 1
+
+
+def test_fetch_entity_context_uses_element_id():
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver)
+
+    store.fetch_entity_context(matches=[{"id": "4:a", "score": 0.9}])
+
+    query, params = driver.calls[-1]
+    assert "elementId(node) = match.id" in query
+    assert params["matches"] == [{"id": "4:a", "score": 0.9}]
+
+
+def test_validate_graph_build_returns_counts():
+    driver = FakeDriver()
+    driver.records = [
+        {
+            "entity_count": 10,
+            "chunk_count": 5,
+            "evidence_link_count": 3,
+            "entity_relationship_count": 2,
+        }
+    ]
+    store = Neo4jGraphStore(driver)
+
+    result = store.validate_graph_build()
+
+    assert result == driver.records[0]

@@ -92,6 +92,113 @@ def test_merge_groups_reports_neo4j_like_processed_node_count():
 
 
 @pytest.mark.asyncio
+async def test_memgraph_resolver_normalized_merges_case_variants():
+    rows = [
+        {
+            "node_id": 1,
+            "entity_id": "e1",
+            "graph_name": "g1",
+            "resolve_value": "OpenAI",
+            "labels": ["__Entity__", "Organization"],
+            "properties": {},
+        },
+        {
+            "node_id": 2,
+            "entity_id": "e2",
+            "graph_name": "g1",
+            "resolve_value": "openai",
+            "labels": ["__Entity__", "Organization"],
+            "properties": {},
+        },
+    ]
+    resolver = _MemgraphEntityResolver(FakeGraphStore(rows=rows))
+
+    result = await resolver.resolve(strategy="normalized", dry_run=True)
+
+    assert result["merged_groups"] == 1
+
+
+@pytest.mark.asyncio
+async def test_memgraph_resolver_does_not_merge_across_graphs():
+    rows = [
+        {
+            "node_id": 1,
+            "entity_id": "e1",
+            "graph_name": "g1",
+            "resolve_value": "OpenAI",
+            "labels": ["__Entity__", "Organization"],
+            "properties": {},
+        },
+        {
+            "node_id": 2,
+            "entity_id": "e2",
+            "graph_name": "g2",
+            "resolve_value": "OpenAI",
+            "labels": ["__Entity__", "Organization"],
+            "properties": {},
+        },
+    ]
+    resolver = _MemgraphEntityResolver(FakeGraphStore(rows=rows))
+
+    result = await resolver.resolve(strategy="exact", dry_run=True)
+
+    assert result["merged_groups"] == 0
+
+
+@pytest.mark.asyncio
+async def test_memgraph_resolver_fuzzy_produces_review_candidate():
+    rows = [
+        {
+            "node_id": 1,
+            "entity_id": "e1",
+            "graph_name": "g1",
+            "resolve_value": "John Smith",
+            "labels": ["__Entity__", "Person"],
+            "properties": {},
+        },
+        {
+            "node_id": 2,
+            "entity_id": "e2",
+            "graph_name": "g1",
+            "resolve_value": "Jon Smith",
+            "labels": ["__Entity__", "Person"],
+            "properties": {},
+        },
+    ]
+    resolver = _MemgraphEntityResolver(FakeGraphStore(rows=rows))
+
+    result = await resolver.resolve(
+        strategy="fuzzy",
+        dry_run=True,
+        merge_threshold=95.0,
+        review_threshold=85.0,
+    )
+
+    assert result["merged_groups"] == 0
+    assert result["review_groups"][0]["decision"] == "review"
+
+
+@pytest.mark.asyncio
+async def test_memgraph_resolver_hybrid_skips_missing_ai_dependencies():
+    rows = [
+        {
+            "node_id": 1,
+            "entity_id": "e1",
+            "graph_name": "g1",
+            "resolve_value": "Acme",
+            "labels": ["__Entity__", "Organization"],
+            "properties": {},
+        }
+    ]
+    resolver = _MemgraphEntityResolver(FakeGraphStore(rows=rows))
+
+    result = await resolver.resolve(strategy="hybrid", dry_run=True)
+
+    assert result["signals"]["embeddings"] == "skipped_no_embedder"
+    assert result["signals"]["llm"] == "skipped_no_llm"
+
+
+@pytest.mark.asyncio
 async def test_memgraph_resolver_hybrid_keeps_llm_review_when_auto_merge_disabled():
     rows = [
         {

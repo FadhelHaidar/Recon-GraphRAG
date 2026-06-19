@@ -1,10 +1,8 @@
 import math
-import os
-
 import pytest
-from dotenv import load_dotenv
 
 from recon_graphrag import create_embedder, create_llm
+from tests.integration.support import require_integration_env
 
 
 RUN_FLAG = "RUN_AZURE_OPENAI_INTEGRATION_TESTS"
@@ -17,14 +15,9 @@ REQUIRED_ENV = [
 
 
 def _azure_env_or_skip():
-    load_dotenv()
+    import os
 
-    if os.getenv(RUN_FLAG, "").lower() not in {"1", "true", "yes"}:
-        pytest.skip(f"Set {RUN_FLAG}=1 to call the real Azure OpenAI endpoint.")
-
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        pytest.skip(f"Missing required Azure OpenAI env vars: {', '.join(missing)}")
+    require_integration_env(RUN_FLAG, REQUIRED_ENV, "Azure OpenAI integration tests")
 
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     return {

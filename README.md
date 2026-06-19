@@ -1,6 +1,6 @@
 # Recon-GraphRAG
 
-Domain-agnostic GraphRAG SDK with a pluggable graph-store backend, following the [Microsoft GraphRAG](https://microsoft.github.io/graphrag/) philosophy. The reference implementation is built on Neo4j.
+Domain-agnostic GraphRAG SDK for Neo4j and Memgraph, with a pluggable graph-store backend and the [Microsoft GraphRAG](https://microsoft.github.io/graphrag/) philosophy.
 
 Like Microsoft GraphRAG, Recon-GraphRAG uses **community detection with multi-level hierarchical communities** to structure knowledge graphs, and provides the same three search paradigms — **Local**, **Global**, and **DRIFT** search — to answer questions at different levels of specificity.
 
@@ -15,11 +15,11 @@ Learn more about the two-stage pipeline in [docs/pipelines.md](docs/pipelines.md
 ## Requirements
 
 - **Python** >= 3.11
-- **Neo4j** (Community or Enterprise edition) with:
-  - **APOC** — optional for some duplicate entity resolution helpers
-  - **GDS** (Graph Data Science) — required for community detection (Leiden algorithm)
+- One supported graph database:
+  - **Neo4j** with **APOC** for merge helpers and **GDS** for Leiden community detection
+  - **Memgraph** with **MAGE** for Leiden community detection
 
-See [docs/installation.md](docs/installation.md) for detailed setup instructions, including a Docker Compose file with Neo4j pre-configured.
+See [docs/installation.md](docs/installation.md) for detailed setup instructions. The included Docker Compose file configures both databases.
 
 ### Backend requirements
 
@@ -32,7 +32,7 @@ The `GraphStore` protocol is designed to be backend-agnostic. A backend must sup
 - Node ID-based embedding upsert
 - Entity merge / deduplication
 
-Neo4j with APOC and GDS is the reference backend.
+Neo4j and Memgraph implement the same `GraphStore` contract. Their index and community-detection implementations use each database's native capabilities.
 
 ## Install
 
@@ -74,8 +74,8 @@ from recon_graphrag import (
 )
 from recon_graphrag.extraction.schema import GraphSchema, NodeType, PropertyType, RelationshipType
 
-# Connect to Neo4j
-driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "password"))
+# Connect to Neo4j (see the quick start for the Memgraph alternative)
+driver = GraphDatabase.driver("bolt://localhost:7688", auth=("neo4j", "password"))
 store = Neo4jGraphStore(driver)
 
 # Create indexes
@@ -135,7 +135,7 @@ For a step-by-step walkthrough, see [docs/quickstart.md](docs/quickstart.md).
 | [docs/pipelines.md](docs/pipelines.md) | `GraphBuilderPipeline` and `CommunityPipeline` architecture |
 | [docs/advanced-workflows.md](docs/advanced-workflows.md) | Composable building blocks below the high-level pipelines |
 | [docs/schema.md](docs/schema.md) | Defining schemas with `GraphSchema` and `build_schema()` |
-| [docs/indexing.md](docs/indexing.md) | Creating and managing Neo4j indexes |
+| [docs/indexing.md](docs/indexing.md) | Creating and managing Neo4j and Memgraph indexes |
 | [docs/providers.md](docs/providers.md) | LLM and embedder providers |
 | [docs/search.md](docs/search.md) | Local, global, and DRIFT search modes |
 | [docs/search-under-the-hood.md](docs/search-under-the-hood.md) | How search works internally |
@@ -149,9 +149,10 @@ A complete movie industry example is available in [examples/](examples/):
 ```bash
 cd examples
 python extract.py
-python ingest.py --backend neo4j
-python communities.py --backend neo4j
+python ingest.py --backend all
+python communities.py --backend all
 python search.py --backend neo4j
+python search.py --backend memgraph
 ```
 
 See [docs/movie-industry-example.md](docs/movie-industry-example.md) for a full walkthrough.

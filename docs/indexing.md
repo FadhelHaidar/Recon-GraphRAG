@@ -1,13 +1,18 @@
 # Indexing
 
-Recon-GraphRAG uses Neo4j vector and fulltext indexes for retrieval. The `IndexManager` helper creates the indexes you need in one call.
+Recon-GraphRAG uses native vector and fulltext indexes in Neo4j and Memgraph. Each backend has an `IndexManager` that creates the required indexes in one call.
 
 ## What IndexManager creates
 
 ```python
-from recon_graphrag import IndexManager, Neo4jGraphStore
+from recon_graphrag import IndexManager as Neo4jIndexManager
+from recon_graphrag.graphdb.memgraph.index_manager import (
+    IndexManager as MemgraphIndexManager,
+)
 
-manager = IndexManager(store, embedding_dim=1536)
+# Select the class matching your store.
+manager_cls = Neo4jIndexManager  # or MemgraphIndexManager
+manager = manager_cls(store, embedding_dim=1536)
 manager.create_indexes()
 ```
 
@@ -28,10 +33,10 @@ These indexes power:
 
 ## When to create indexes
 
-Create indexes once after setting up a new Neo4j database, before running any pipeline:
+Create indexes once after setting up a new graph database, before running any pipeline:
 
 ```python
-IndexManager(store, embedding_dim=1536).create_indexes()
+manager_cls(store, embedding_dim=1536).create_indexes()
 ```
 
 You do not need to recreate them every time you ingest more text, unless you change the embedding dimension or want to drop and rebuild the graph from scratch.
@@ -54,7 +59,7 @@ For sentence-transformers, `IndexManager` can auto-detect the dimension:
 from recon_graphrag import create_embedder
 
 embedder = create_embedder("sentence-transformer", model="all-MiniLM-L6-v2")
-manager = IndexManager(store, embedder=embedder)
+manager = manager_cls(store, embedder=embedder)
 manager.create_indexes()
 ```
 
@@ -74,7 +79,7 @@ embedder = create_embedder(
     model_params={"dimensions": 512},
 )
 
-manager = IndexManager(store, embedding_dim=512)
+manager = manager_cls(store, embedding_dim=512)
 manager.create_indexes()
 ```
 
@@ -95,14 +100,13 @@ This is useful during development to confirm that:
 
 ## Rebuilding indexes
 
-If you change the embedding dimension or want to start fresh, drop the existing indexes and recreate them:
+If you change the embedding dimension, recreate the managed indexes:
 
 ```python
-manager.drop_indexes()
 manager.create_indexes()
 ```
 
-> **Warning:** Dropping indexes does not delete graph data, but it will remove the indexes until you recreate them.
+Both managers replace their managed indexes during `create_indexes()`. This does not delete graph data, but queries may briefly run without those indexes while they are recreated.
 
 ## Next steps
 
