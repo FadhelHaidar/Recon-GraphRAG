@@ -1,4 +1,4 @@
-"""Tests for index manager and internal entity resolver."""
+"""Tests for the Neo4j index manager and internal entity resolver."""
 
 import pytest
 
@@ -66,6 +66,9 @@ def test_index_manager_create_indexes_uses_graph_store_methods():
             "node_properties": ["name"],
         }
     ]
+    constraint_calls = [call for call in store.calls if "CREATE CONSTRAINT" in call[0]]
+    assert len(constraint_calls) == 1
+    assert "(c.graph_name, c.level, c.id) IS UNIQUE" in constraint_calls[0][0]
 
 
 @pytest.mark.asyncio

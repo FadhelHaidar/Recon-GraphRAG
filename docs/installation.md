@@ -1,21 +1,21 @@
 # Installation
 
-Recon-GraphRAG is a Python library for building GraphRAG pipelines on Neo4j. It is not yet published to PyPI, so install it directly from GitHub.
+Recon-GraphRAG is a Python library for building GraphRAG pipelines on Neo4j or Memgraph. It is not yet published to PyPI, so install it directly from GitHub.
 
 We recommend using [`uv`](https://docs.astral.sh/uv/) for fast, reliable Python package management. The instructions below use `uv` by default and show `pip` alternatives where applicable.
 
 ## Requirements
 
 - **Python** >= 3.11
-- **Neo4j** (Community or Enterprise edition) with:
-  - **APOC** — optional, used for some internal duplicate entity resolution helpers
-  - **GDS** (Graph Data Science) — required for community detection (Leiden algorithm)
+- One supported graph database:
+  - **Neo4j** with **APOC** for merge helpers and **GDS** for Leiden community detection
+  - **Memgraph** with **MAGE** for Leiden community detection
 
-If you do not already have a Neo4j instance with these plugins, use the Docker Compose setup below.
+If you do not already have a configured database, use the Docker Compose setup below.
 
-## Neo4j with Docker Compose
+## Graph databases with Docker Compose
 
-The repository includes a ready-to-use Neo4j Enterprise container with APOC and GDS pre-installed.
+The repository includes Neo4j with APOC/GDS and Memgraph with MAGE. Memgraph Lab is also available for browser-based inspection.
 
 ```bash
 # Clone the repo
@@ -25,17 +25,24 @@ cd Recon-GraphRAG
 # Copy and customize the environment file (optional)
 cp .env.example .env
 
-# Start Neo4j
+# Start one backend
+docker-compose up -d neo4j
+docker-compose up -d memgraph lab
+
+# Or start both backends and Memgraph Lab
 docker-compose up -d
 
 # Wait for it to be ready (usually takes ~30 seconds)
 docker-compose logs -f neo4j
+docker-compose logs -f memgraph
 ```
 
-Neo4j will be available at:
+The services will be available at:
 
-- **Browser**: <http://localhost:7474> (login: `neo4j` / password)
-- **Bolt**: `bolt://localhost:7687`
+- **Neo4j Browser**: <http://localhost:7475> (login: `neo4j` / `password`)
+- **Neo4j Bolt**: `bolt://localhost:7688`
+- **Memgraph Bolt**: `bolt://localhost:7689`
+- **Memgraph Lab**: <http://localhost:3000>
 
 To stop:
 
@@ -58,6 +65,10 @@ If you prefer to use your own Neo4j instance:
    ```
 
 4. Restart Neo4j and confirm the plugins load by running `CALL apoc.meta.schema()` and `CALL gds.version()` in the Neo4j Browser.
+
+### Manual Memgraph setup
+
+Install a current Memgraph release with MAGE and expose its Bolt endpoint. Set `MEMGRAPH_URL`, plus `MEMGRAPH_USERNAME`, `MEMGRAPH_PASSWORD`, and `MEMGRAPH_DATABASE` when your deployment requires them. The Python Neo4j driver is used for both backends because Memgraph supports the Bolt protocol.
 
 ## Install with uv (recommended)
 
@@ -214,7 +225,13 @@ pip install "recon-graphrag[openai] @ git+https://github.com/FadhelHaidar/Recon-
 
 - Ensure Neo4j is running and the Bolt URL and credentials are correct.
 - If you are using the Docker Compose setup, the default credentials are `neo4j` / `password`.
-- Check that the Bolt port (`7687` by default) is not blocked by a firewall.
+- Check that the configured Bolt port is not blocked by a firewall.
+
+### Memgraph connection errors
+
+- Ensure Memgraph is running and `MEMGRAPH_URL` points to its Bolt endpoint.
+- Docker Compose exposes Memgraph at `bolt://localhost:7689` without authentication by default.
+- Community detection requires the MAGE image or a Memgraph installation with `leiden_community_detection` available.
 
 ### GDS or APOC not found
 

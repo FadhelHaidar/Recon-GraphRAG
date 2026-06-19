@@ -6,8 +6,8 @@ The short version:
 
 - Run mandatory tests while developing: `pytest -m "not integration"`
 - Run provider integration tests when changing provider setup.
-- Run focused Neo4j integration tests when changing real database behavior.
-- Run the Neo4j movie smoke test when you need full end-to-end confidence.
+- Run focused integration tests for the database whose behavior changed.
+- Run the matching Neo4j or Memgraph movie smoke test for end-to-end confidence.
 
 ## Testing model
 
@@ -15,9 +15,9 @@ The suite is split into two layers.
 
 ### Mandatory tests
 
-Mandatory tests are fast, local, and deterministic. They do not require real provider credentials or a live Neo4j database.
+Mandatory tests are fast, local, and deterministic. They do not require real provider credentials or a live graph database.
 
-They use fake graph stores, fake Neo4j drivers/sessions, fake LLMs, fake embedders, monkeypatched provider clients, and in-memory assertions.
+They use fake graph stores, fake Bolt drivers/sessions, fake LLMs, fake embedders, monkeypatched provider clients, and in-memory assertions.
 
 They answer questions like:
 
@@ -34,7 +34,7 @@ Integration tests are marked with `@pytest.mark.integration`. They are collected
 They answer questions like:
 
 - Does this work against real external services?
-- Does this work against real Neo4j?
+- Does this work against real Neo4j or Memgraph?
 - Does the complete workflow still run end to end?
 
 These tests may be slower, flaky if external services are unhealthy, and may incur provider cost.
@@ -46,18 +46,25 @@ These tests may be slower, flaky if external services are unhealthy, and may inc
 | `tests/extraction/` | No | No | No | JSON parsing, schema validation, chunking, and graph document assembly. |
 | `tests/llm/` | No | No | No | LLM protocol and factory behavior using fake or monkeypatched clients. |
 | `tests/embeddings/` | No | No | No | Embedder protocol and factory behavior using fake or monkeypatched clients. |
-| `tests/graphdb/neo4j/test_entity_resolution.py` | Fake only | Fake only | No | Entity resolution strategy logic without real Neo4j or real models. |
-| `tests/graphdb/neo4j/test_index_manager.py` | No | No | No | Index manager index creation and resolver wrapper behavior. |
+| `tests/graphdb/neo4j/test_neo4j_entity_resolution.py` | Fake only | Fake only | No | Neo4j entity-resolution strategies and APOC behavior. |
+| `tests/graphdb/neo4j/test_neo4j_index_manager.py` | No | No | No | Neo4j index manager and resolver-wrapper behavior. |
 | `tests/graphdb/neo4j/test_neo4j_store.py` | No | No | No | Neo4j store query construction using fake driver/session objects. |
-| `tests/pipelines/neo4j/test_writer.py` | No | No | No | Neo4j graph writer query generation using a fake graph store. |
+| `tests/graphdb/memgraph/` | Fake only | Fake only | No | Memgraph store, index, and entity-resolution behavior using fakes. |
+| `tests/pipelines/neo4j/test_neo4j_writer.py` | No | No | No | Shared graph-writer contract against the Neo4j writer. |
+| `tests/pipelines/memgraph/test_memgraph_writer.py` | No | No | No | The same graph-writer contract against the Memgraph writer. |
 | `tests/pipelines/test_graph_builder.py` | Fake only | Fake only | No | Pipeline orchestration with fake LLM, fake embedder, fake graph store, and fake writer. |
-| `tests/communities/` | No | Fake only | No | Community embedding and Neo4j community detection query behavior using fakes. |
+| `tests/communities/` | No | Fake only | No | Shared, Neo4j, and Memgraph community behavior using fakes. |
 | `tests/retrieval/` | Fake only | Fake only | No | Retrieval, ranking, and answer-generation flow using fake LLM/embedder/store. |
 | `tests/integration/test_azure_openai_env.py` | Yes | Yes | No | Real Azure OpenAI LLM and embedding endpoint checks. |
 | `tests/integration/test_openrouter_env.py` | Yes | Yes | No | Real OpenRouter LLM and embedding endpoint checks. |
-| `tests/integration/neo4j/test_entity_resolution_integration.py` | Optional | Optional | Yes | Real Neo4j entity resolution; real LLM/embedder only with the AI flag. |
-| `tests/integration/test_movie_example_smoke.py` | Yes | Yes | Yes | Neo4j end-to-end movie example: real provider + real Neo4j + APOC/GDS. |
-| `tests/manual/` | Yes | Yes | No | Manual diagnostics; not part of normal test guidance. |
+| `tests/integration/neo4j/test_neo4j_entity_resolution_integration.py` | Optional | Optional | Yes | Real Neo4j entity resolution; real LLM/embedder only with the AI flag. |
+| `tests/integration/memgraph/test_memgraph_entity_resolution_integration.py` | Optional | Optional | Yes | The same entity-resolution scenarios against Memgraph. |
+| `tests/integration/neo4j/test_neo4j_community_detection_integration.py` | No | No | Yes | Weighted Leiden community detection through APOC/GDS. |
+| `tests/integration/memgraph/test_memgraph_community_detection_integration.py` | No | No | Yes | The same weighted Leiden scenario through MAGE. |
+| `tests/integration/neo4j/test_neo4j_store_smoke.py` | No | No | Yes | Scoped graph-document write/read checks against Neo4j. |
+| `tests/integration/neo4j/test_neo4j_movie_smoke.py` | Yes | Yes | Yes | Neo4j end-to-end movie example with APOC/GDS. |
+| `tests/integration/memgraph/test_memgraph_store_smoke.py` | No | No | Yes | Scoped graph-document write/read checks against Memgraph. |
+| `tests/integration/memgraph/test_memgraph_movie_smoke.py` | Yes | Yes | Yes | Memgraph end-to-end movie example with MAGE. |
 
 Meaning:
 
@@ -66,6 +73,114 @@ Meaning:
 - **Optional**: some tests run without it; extra scenarios use it when a flag is enabled.
 - **Yes**: the test requires the real dependency when enabled.
 
+## Scenario dependency matrix
+
+| Scenario | Real LLM | Real embedder | Real database | Cost/network risk |
+| --- | ---: | ---: | ---: | --- |
+| Mandatory unit tests | No | No | No | None |
+| Azure OpenAI endpoint checks | Yes | Yes | No | Provider calls |
+| OpenRouter endpoint checks | Yes | Yes | No | Provider calls |
+| Store persistence smoke | No | No | Yes | Database only |
+| Community detection integration | No | No | Yes | Database only |
+| Entity resolution without AI flag | No | No | Yes | Database only |
+| Entity resolution with AI flag | Yes | Yes | Yes | Provider calls and database writes |
+| Movie workflow smoke | Yes | Yes | Yes | Highest cost; extraction, embeddings, summaries, and searches |
+
+Provider endpoint tests are fixed to the provider named by the test file. Database-plus-AI tests use `LLM_PROVIDER` and `EMBEDDER_PROVIDER` after their run flags are enabled; they do not probe providers automatically.
+
+Supported workflow selections include:
+
+```text
+LLM_PROVIDER=azure_openai       EMBEDDER_PROVIDER=azure_openai
+LLM_PROVIDER=openrouter         EMBEDDER_PROVIDER=openrouter
+LLM_PROVIDER=openrouter         EMBEDDER_PROVIDER=sentence-transformer
+```
+
+The selected provider variables must also be configured:
+
+| Selection | Required variables |
+| --- | --- |
+| Azure OpenAI LLM | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_LLM_DEPLOYMENT_NAME` |
+| Azure OpenAI embedder | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_EMBED_MODEL_DEPLOYMENT_NAME` |
+| OpenRouter LLM | `OPENROUTER_API_KEY`, `OPENROUTER_LLM_MODEL` |
+| OpenRouter embedder | `OPENROUTER_API_KEY`, `OPENROUTER_EMBED_MODEL` |
+| Sentence-Transformers embedder | No provider credentials; the local model dependency must be installed |
+
+### Scenario recipes
+
+Provider only, without a database:
+
+```bash
+# Azure OpenAI LLM and embedding endpoints
+RUN_AZURE_OPENAI_INTEGRATION_TESTS=1 pytest tests/integration/test_azure_openai_env.py
+
+# OpenRouter LLM and embedding endpoints
+RUN_OPENROUTER_INTEGRATION_TESTS=1 pytest tests/integration/test_openrouter_env.py
+```
+
+Database only, without real LLM or embedding calls:
+
+```bash
+# Neo4j
+RUN_NEO4J_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_store_smoke.py
+RUN_NEO4J_COMMUNITY_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_community_detection_integration.py
+RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py
+
+# Memgraph
+RUN_MEMGRAPH_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_store_smoke.py
+RUN_MEMGRAPH_COMMUNITY_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_community_detection_integration.py
+RUN_MEMGRAPH_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_entity_resolution_integration.py
+```
+
+AI-assisted entity resolution with Azure OpenAI and a real database:
+
+```bash
+LLM_PROVIDER=azure_openai EMBEDDER_PROVIDER=azure_openai \
+RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 \
+RUN_NEO4J_ENTITY_RESOLUTION_AI_TESTS=1 \
+pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py
+
+LLM_PROVIDER=azure_openai EMBEDDER_PROVIDER=azure_openai \
+RUN_MEMGRAPH_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 \
+RUN_MEMGRAPH_ENTITY_RESOLUTION_AI_TESTS=1 \
+pytest tests/integration/memgraph/test_memgraph_entity_resolution_integration.py
+```
+
+Use OpenRouter for the same scenarios by changing both provider selections to `openrouter` and configuring the OpenRouter variables:
+
+```bash
+LLM_PROVIDER=openrouter EMBEDDER_PROVIDER=openrouter \
+RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 \
+RUN_NEO4J_ENTITY_RESOLUTION_AI_TESTS=1 \
+pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py
+```
+
+Full movie workflow with the selected provider and database:
+
+```bash
+# Azure OpenAI + Neo4j
+LLM_PROVIDER=azure_openai EMBEDDER_PROVIDER=azure_openai \
+RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 \
+pytest tests/integration/neo4j/test_neo4j_movie_smoke.py
+
+# OpenRouter + Neo4j
+LLM_PROVIDER=openrouter EMBEDDER_PROVIDER=openrouter \
+RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 \
+pytest tests/integration/neo4j/test_neo4j_movie_smoke.py
+
+# Azure OpenAI + Memgraph
+LLM_PROVIDER=azure_openai EMBEDDER_PROVIDER=azure_openai \
+RUN_MEMGRAPH_MOVIE_EXAMPLE_SMOKE_TESTS=1 \
+pytest tests/integration/memgraph/test_memgraph_movie_smoke.py
+
+# OpenRouter + Memgraph
+LLM_PROVIDER=openrouter EMBEDDER_PROVIDER=openrouter \
+RUN_MEMGRAPH_MOVIE_EXAMPLE_SMOKE_TESTS=1 \
+pytest tests/integration/memgraph/test_memgraph_movie_smoke.py
+```
+
+In PowerShell, set the same values with `$env:NAME="value"` on separate lines before invoking `pytest`.
+
 ## What to run by change type
 
 | Change type | Recommended command |
@@ -73,15 +188,20 @@ Meaning:
 | Parser, schema, validator, chunking, assembler | `pytest tests/extraction` |
 | LLM wrapper/factory code | `pytest tests/llm` |
 | Embedding wrapper/factory code | `pytest tests/embeddings` |
-| Entity deduplication local logic | `pytest tests/graphdb/neo4j/test_entity_resolution.py tests/graphdb/neo4j/test_index_manager.py tests/pipelines/test_graph_builder.py` |
-| Entity deduplication with real Neo4j | `RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_entity_resolution_integration.py` |
-| Hybrid dedup with real Neo4j + real LLM/embedder | Enable both entity-resolution integration flags and run `pytest tests/integration/neo4j/test_entity_resolution_integration.py` |
+| Entity deduplication local logic | `pytest tests/graphdb/neo4j/test_neo4j_entity_resolution.py tests/graphdb/memgraph/test_memgraph_entity_resolution.py tests/pipelines/test_graph_builder.py` |
+| Entity deduplication with real Neo4j | `RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py` |
+| Entity deduplication with real Memgraph | `RUN_MEMGRAPH_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_entity_resolution_integration.py` |
+| Hybrid dedup with real Neo4j + real LLM/embedder | Enable both entity-resolution integration flags and run `pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py` |
 | Neo4j store, indexes, writer queries | `pytest tests/graphdb/neo4j tests/pipelines/neo4j` |
-| Graph builder pipeline | `pytest tests/pipelines/test_graph_builder.py tests/extraction tests/graphdb/neo4j/test_entity_resolution.py` |
+| Memgraph store, indexes, writer queries | `pytest tests/graphdb/memgraph tests/pipelines/memgraph` |
+| Graph builder pipeline | `pytest tests/pipelines/test_graph_builder.py tests/extraction tests/graphdb` |
 | Community detection/embedding helpers | `pytest tests/communities` |
 | Retrieval or search behavior | `pytest tests/retrieval` |
 | Provider credentials or provider request shape | Run `pytest tests/llm tests/embeddings`, then the relevant provider integration test |
-| Real Neo4j end-to-end graph build/search | `RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 pytest tests/integration/test_movie_example_smoke.py` |
+| Real Neo4j end-to-end graph build/search | `RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 pytest tests/integration/neo4j/test_neo4j_movie_smoke.py` |
+| Real Neo4j store behavior | `RUN_NEO4J_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_store_smoke.py` |
+| Real Memgraph store behavior | `RUN_MEMGRAPH_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_store_smoke.py` |
+| Real Memgraph end-to-end graph build/search | `RUN_MEMGRAPH_MOVIE_EXAMPLE_SMOKE_TESTS=1 pytest tests/integration/memgraph/test_memgraph_movie_smoke.py` |
 | Before normal commit | `pytest -m "not integration"` |
 | Before release or major workflow change | `pytest`, then enabled integration tests for configured providers/services |
 
@@ -114,9 +234,16 @@ This runs mandatory tests plus optional tests that skip unless enabled.
 ```bash
 RUN_AZURE_OPENAI_INTEGRATION_TESTS=1 \
 RUN_OPENROUTER_INTEGRATION_TESTS=1 \
+RUN_NEO4J_INTEGRATION_TESTS=1 \
 RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 \
 RUN_NEO4J_ENTITY_RESOLUTION_AI_TESTS=1 \
+RUN_NEO4J_COMMUNITY_INTEGRATION_TESTS=1 \
 RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 \
+RUN_MEMGRAPH_INTEGRATION_TESTS=1 \
+RUN_MEMGRAPH_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 \
+RUN_MEMGRAPH_ENTITY_RESOLUTION_AI_TESTS=1 \
+RUN_MEMGRAPH_COMMUNITY_INTEGRATION_TESTS=1 \
+RUN_MEMGRAPH_MOVIE_EXAMPLE_SMOKE_TESTS=1 \
 pytest
 ```
 
@@ -125,9 +252,16 @@ pytest
 ```powershell
 $env:RUN_AZURE_OPENAI_INTEGRATION_TESTS="1"
 $env:RUN_OPENROUTER_INTEGRATION_TESTS="1"
+$env:RUN_NEO4J_INTEGRATION_TESTS="1"
 $env:RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS="1"
 $env:RUN_NEO4J_ENTITY_RESOLUTION_AI_TESTS="1"
+$env:RUN_NEO4J_COMMUNITY_INTEGRATION_TESTS="1"
 $env:RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS="1"
+$env:RUN_MEMGRAPH_INTEGRATION_TESTS="1"
+$env:RUN_MEMGRAPH_ENTITY_RESOLUTION_INTEGRATION_TESTS="1"
+$env:RUN_MEMGRAPH_ENTITY_RESOLUTION_AI_TESTS="1"
+$env:RUN_MEMGRAPH_COMMUNITY_INTEGRATION_TESTS="1"
+$env:RUN_MEMGRAPH_MOVIE_EXAMPLE_SMOKE_TESTS="1"
 pytest
 ```
 
@@ -167,7 +301,7 @@ OPENROUTER_EMBED_MODEL
 ### Neo4j entity resolution
 
 ```bash
-RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_entity_resolution_integration.py
+RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py
 ```
 
 Required environment variables:
@@ -178,45 +312,83 @@ NEO4J_USERNAME
 NEO4J_PASSWORD
 ```
 
-With real Azure OpenAI LLM and embedder:
+With the selected real LLM and embedder:
 
 ```bash
 RUN_NEO4J_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 \
 RUN_NEO4J_ENTITY_RESOLUTION_AI_TESTS=1 \
-pytest tests/integration/neo4j/test_entity_resolution_integration.py
+pytest tests/integration/neo4j/test_neo4j_entity_resolution_integration.py
 ```
+
+### Memgraph entity resolution
+
+```bash
+RUN_MEMGRAPH_ENTITY_RESOLUTION_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_entity_resolution_integration.py
+```
+
+Required environment variable: `MEMGRAPH_URL`. Enable `RUN_MEMGRAPH_ENTITY_RESOLUTION_AI_TESTS=1` and configure the selected provider variables to include the real AI review scenario.
 
 ### Neo4j community detection
 
 ```bash
-RUN_NEO4J_COMMUNITY_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_community_detection_integration.py
+RUN_NEO4J_COMMUNITY_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_community_detection_integration.py
 ```
 
-Required environment variables:
+Required database environment variables:
 
 ```text
 NEO4J_URL
 NEO4J_USERNAME
 NEO4J_PASSWORD
 ```
+
+### Memgraph community detection
+
+```bash
+RUN_MEMGRAPH_COMMUNITY_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_community_detection_integration.py
+```
+
+Required environment variable: `MEMGRAPH_URL`. The configured instance must include MAGE.
 
 ### Neo4j movie example smoke test
 
 ```bash
-RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 pytest tests/integration/test_movie_example_smoke.py
+RUN_NEO4J_MOVIE_EXAMPLE_SMOKE_TESTS=1 pytest tests/integration/neo4j/test_neo4j_movie_smoke.py
 ```
 
 Required environment variables:
 
 ```text
-AZURE_OPENAI_ENDPOINT
-AZURE_OPENAI_API_KEY
-AZURE_OPENAI_LLM_DEPLOYMENT_NAME
-AZURE_OPENAI_EMBED_MODEL_DEPLOYMENT_NAME
 NEO4J_URL
 NEO4J_USERNAME
 NEO4J_PASSWORD
 ```
+
+The selected LLM and embedder variables from the scenario matrix are also required.
+
+### Neo4j store smoke test
+
+```bash
+RUN_NEO4J_INTEGRATION_TESTS=1 pytest tests/integration/neo4j/test_neo4j_store_smoke.py
+```
+
+Required environment variables: `NEO4J_URL`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`.
+
+### Memgraph store smoke test
+
+```bash
+RUN_MEMGRAPH_INTEGRATION_TESTS=1 pytest tests/integration/memgraph/test_memgraph_store_smoke.py
+```
+
+Required environment variable: `MEMGRAPH_URL`. Authentication and database variables are optional.
+
+### Memgraph movie example smoke test
+
+```bash
+RUN_MEMGRAPH_MOVIE_EXAMPLE_SMOKE_TESTS=1 pytest tests/integration/memgraph/test_memgraph_movie_smoke.py
+```
+
+This requires `MEMGRAPH_URL` plus the selected LLM and embedder variables from the scenario matrix. The configured Memgraph instance must include MAGE.
 
 ## Environment setup
 

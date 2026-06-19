@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 
-EXAMPLE_DIR = Path(__file__).resolve().parents[2] / "examples"
-sys.path.insert(0, str(EXAMPLE_DIR))
-
-import common  # noqa: E402
-from common import SEARCH_OPTIONS, configure_movie_rag, run_movie_search_suite  # noqa: E402
-from common import extract_graph_document_from_pages  # noqa: E402
-import ingest  # noqa: E402
-from ingest import ingest_artifact  # noqa: E402
-from query_suite import MOVIE_QUERY_SUITE  # noqa: E402
-from recon_graphrag.extraction.types import (  # noqa: E402
+from examples import common, ingest
+from examples.common import (
+    SEARCH_OPTIONS,
+    configure_movie_rag,
+    extract_graph_document_from_pages,
+    run_movie_search_suite,
+)
+from examples.ingest import ingest_artifact
+from examples.query_suite import MOVIE_QUERY_SUITE
+from recon_graphrag.extraction.types import (
     DocumentRecord,
     GraphDocument,
 )
-from recon_graphrag.extraction.schema import (  # noqa: E402
+from recon_graphrag.extraction.schema import (
     GraphSchema,
     NodeType,
     PropertyType,
@@ -201,7 +200,7 @@ async def test_ingest_artifact_finalizes_after_all_backend_writes(monkeypatch):
             ("memgraph", FakeStore("memgraph"), FakeIndexManager),
         ],
     )
-    monkeypatch.setattr("common.CommunityEmbedder", FakeCommunityEmbedder)
+    monkeypatch.setattr(common, "CommunityEmbedder", FakeCommunityEmbedder)
 
     result = await ingest_artifact(
         Path("movie_graph.json"),

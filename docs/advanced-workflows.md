@@ -344,7 +344,7 @@ pipeline = GraphBuilderPipeline(
 
 ### Implement a custom GraphStore
 
-Implement every method in `GraphStore` to add a new backend. The unit tests for `Neo4jGraphStore` are the best reference for the expected behavior of each method.
+Implement every method in `GraphStore` to add a new backend. The Neo4j and Memgraph store tests show the shared contract alongside backend-specific query behavior.
 
 ```python
 from recon_graphrag.graphdb.base import GraphStore

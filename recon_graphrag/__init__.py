@@ -1,4 +1,4 @@
-"""Recon-GraphRAG: Domain-agnostic GraphRAG SDK built on Neo4j."""
+"""Recon-GraphRAG: a GraphRAG SDK for Neo4j and Memgraph."""
 
 __version__ = "0.2.3"
 

@@ -99,7 +99,7 @@ What happens:
 
 The LLM only sees the matched entities and their immediate neighborhood. It does **not** see community summaries.
 
-See [`LocalSearchRetriever`](recon_graphrag/retrieval/local.py) and the local retrieval query in [`retrieval/neo4j/queries.py`](recon_graphrag/retrieval/neo4j/queries.py).
+See [`LocalSearchRetriever`](recon_graphrag/retrieval/local.py) and the backend queries in [`retrieval/neo4j/queries.py`](recon_graphrag/retrieval/neo4j/queries.py) and [`retrieval/memgraph/queries.py`](recon_graphrag/retrieval/memgraph/queries.py).
 
 ---
 
