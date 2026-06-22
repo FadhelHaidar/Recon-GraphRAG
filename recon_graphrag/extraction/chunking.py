@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class TokenCounter(Protocol):
+    """Minimal protocol for token counting (matches utils.tokens.TokenCounter)."""
+
+    def count(self, text: str) -> int: ...
+    def truncate(self, text: str, max_tokens: int) -> str: ...
 
 
 @dataclass
@@ -14,16 +23,40 @@ class TextChunk:
 
 
 class TextChunker:
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+    """Split text into overlapping chunks.
+
+    Supports two units:
+    - ``"characters"`` (default): existing character-based sliding window.
+    - ``"tokens"``: token-based sliding window using a ``TokenCounter``.
+      Requires ``token_counter`` to be provided.
+
+    In both modes each chunk retains ``char_start`` and ``char_end`` in the
+    original text. Token mode additionally records ``token_start`` and
+    ``token_end``.
+    """
+
+    def __init__(
+        self,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+        unit: str = "characters",
+        token_counter: TokenCounter | None = None,
+    ):
         if chunk_size <= 0:
             raise ValueError("chunk_size must be > 0")
         if chunk_overlap < 0:
             raise ValueError("chunk_overlap must be >= 0")
         if chunk_overlap >= chunk_size:
             raise ValueError("chunk_overlap must be < chunk_size")
+        if unit not in ("characters", "tokens"):
+            raise ValueError(f"unit must be 'characters' or 'tokens', got {unit!r}")
+        if unit == "tokens" and token_counter is None:
+            raise ValueError("token_counter is required when unit='tokens'")
 
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.unit = unit
+        self.token_counter = token_counter
 
     def chunk_text(
         self,
@@ -31,7 +64,16 @@ class TextChunker:
         document_id: str,
         metadata: dict | None = None,
     ) -> list[TextChunk]:
-        metadata = metadata or {}
+        if self.unit == "tokens":
+            return self._chunk_by_tokens(text, document_id, metadata or {})
+        return self._chunk_by_characters(text, document_id, metadata or {})
+
+    def _chunk_by_characters(
+        self,
+        text: str,
+        document_id: str,
+        metadata: dict,
+    ) -> list[TextChunk]:
         chunks = []
         step = self.chunk_size - self.chunk_overlap
 
@@ -56,6 +98,61 @@ class TextChunker:
 
             if end >= len(text):
                 break
+
+        return chunks
+
+    def _chunk_by_tokens(
+        self,
+        text: str,
+        document_id: str,
+        metadata: dict,
+    ) -> list[TextChunk]:
+        counter = self.token_counter
+        assert counter is not None  # guarded by __init__ validation
+
+        total_tokens = counter.count(text)
+        if total_tokens == 0:
+            return []
+
+        step = self.chunk_size - self.chunk_overlap
+        chunks = []
+        char_start = 0
+        token_start = 0
+        index = 0
+
+        while char_start < len(text) and token_start < total_tokens:
+            # Find the text that fits in chunk_size tokens starting from char_start
+            remaining_text = text[char_start:]
+            chunk_text = counter.truncate(remaining_text, self.chunk_size)
+            if not chunk_text or not chunk_text.strip():
+                break
+
+            char_end = char_start + len(chunk_text)
+            token_end = token_start + counter.count(chunk_text)
+
+            chunks.append(
+                TextChunk(
+                    id=f"{document_id}:chunk:{index}",
+                    text=chunk_text,
+                    index=index,
+                    metadata={
+                        **metadata,
+                        "char_start": char_start,
+                        "char_end": char_end,
+                        "token_start": token_start,
+                        "token_end": token_end,
+                    },
+                )
+            )
+
+            if char_end >= len(text):
+                break
+
+            # Advance by step tokens
+            advance_text = counter.truncate(remaining_text, step)
+            char_start += len(advance_text)
+            token_start += step
+            index += 1
 
         return chunks
 
