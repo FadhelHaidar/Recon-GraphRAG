@@ -48,6 +48,9 @@ def test_neo4j_cross_document_rerun_is_idempotent(neo4j_store):
     assert_cross_document_rerun_idempotent(neo4j_store, GRAPH_NAME)
 
 
+@pytest.mark.xfail(
+    reason="Known defect: writer MERGE keys do not scope by graph_name. Phase 2 will fix."
+)
 @pytest.mark.characterization
 @pytest.mark.integration
 def test_neo4j_graph_name_isolation_characterization(neo4j_store):

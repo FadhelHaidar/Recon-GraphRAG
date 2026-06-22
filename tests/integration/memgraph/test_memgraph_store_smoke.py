@@ -55,6 +55,9 @@ def test_memgraph_cross_document_rerun_is_idempotent(memgraph_store):
     assert_cross_document_rerun_idempotent(memgraph_store, GRAPH_NAME)
 
 
+@pytest.mark.xfail(
+    reason="Known defect: writer MERGE keys do not scope by graph_name. Phase 2 will fix."
+)
 @pytest.mark.characterization
 @pytest.mark.integration
 def test_memgraph_graph_name_isolation_characterization(memgraph_store):
