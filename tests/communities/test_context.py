@@ -1,4 +1,4 @@
-"""Tests for typed community context records and rendering."""
+"""Tests for typed community context records, rendering, and packing."""
 
 from __future__ import annotations
 
@@ -6,9 +6,13 @@ from recon_graphrag.communities.context import (
     CommunityContext,
     EdgeContext,
     EntityContext,
+    PackedCommunityContext,
+    pack_community_context,
     parse_community_context,
     render_community_context,
+    substitute_child_reports,
 )
+from recon_graphrag.utils.tokens import ApproximateTokenCounter
 
 
 def _make_rows():
@@ -185,3 +189,171 @@ class TestRenderCommunityContext:
         assert "Charlie" in text
         assert "WORKS_AT" in text
         assert "FRIEND_OF" in text
+
+
+def _make_large_context(n_edges: int = 10) -> CommunityContext:
+    """Create a context with n edges for packing tests."""
+    edges = []
+    for i in range(n_edges):
+        edges.append(
+            EdgeContext(
+                source=EntityContext(id=f"e{i}", name=f"Entity{i}", description=f"Description {i}", labels=["Person"], degree=10 - i),
+                target=EntityContext(id=f"e{i+10}", name=f"Target{i}", description=f"Target desc {i}", labels=["Org"], degree=5),
+                relationship_type="RELATES_TO",
+                combined_degree=15 - i,
+            )
+        )
+    return CommunityContext(community_id="c1", level=0, edges=edges)
+
+
+class TestPackCommunityContext:
+    def test_all_fit_in_budget(self):
+        ctx = _make_large_context(3)
+        counter = ApproximateTokenCounter(ratio=4.0)
+        full_text = render_community_context(ctx)
+        full_tokens = counter.count(full_text)
+
+        packed = pack_community_context(ctx, max_tokens=full_tokens + 100, counter=counter)
+
+        assert packed.included_edges == 3
+        assert packed.excluded_edges == 0
+        assert packed.truncated is False
+        assert packed.used_tokens > 0
+
+    def test_excludes_when_over_budget(self):
+        ctx = _make_large_context(10)
+        counter = ApproximateTokenCounter(ratio=4.0)
+
+        # Very small budget — only first few edges fit
+        packed = pack_community_context(ctx, max_tokens=50, counter=counter)
+
+        assert packed.included_edges < 10
+        assert packed.excluded_edges > 0
+        assert packed.truncated is True
+
+    def test_ranked_order_preserved(self):
+        ctx = _make_large_context(5)
+        counter = ApproximateTokenCounter(ratio=4.0)
+
+        # Budget fits first 2 edges
+        full_text = render_community_context(ctx)
+        # Estimate tokens for first 2 edges
+        lines = full_text.split("\n")
+        first_two = "\n".join(lines[:6])  # approx first 2 edge blocks
+        budget = counter.count(first_two)
+
+        packed = pack_community_context(ctx, max_tokens=budget, counter=counter)
+
+        # First edge (highest degree) should be included
+        assert "Entity0" in packed.text
+        assert "RELATES_TO" in packed.text
+
+    def test_zero_budget_returns_empty(self):
+        ctx = _make_large_context(3)
+        packed = pack_community_context(ctx, max_tokens=0)
+
+        assert packed.text == ""
+        assert packed.used_tokens == 0
+        assert packed.included_edges == 0
+
+    def test_entity_deduplication_saves_tokens(self):
+        """Same entity in multiple edges only includes description once."""
+        long_desc = "Alice is a very important person with a long description."
+        ctx = CommunityContext(
+            community_id="c1",
+            level=0,
+            edges=[
+                EdgeContext(
+                    source=EntityContext(id="e1", name="Alice", description=long_desc, labels=["Person"], degree=5),
+                    target=EntityContext(id="e2", name="Acme", description="Short", labels=["Org"], degree=3),
+                    relationship_type="WORKS_AT",
+                    combined_degree=8,
+                ),
+                EdgeContext(
+                    source=EntityContext(id="e1", name="Alice", description=long_desc, labels=["Person"], degree=5),
+                    target=EntityContext(id="e3", name="Bob", description="Short", labels=["Person"], degree=2),
+                    relationship_type="FRIEND_OF",
+                    combined_degree=7,
+                ),
+            ],
+        )
+        counter = ApproximateTokenCounter(ratio=4.0)
+        packed = pack_community_context(ctx, max_tokens=200, counter=counter)
+
+        # Alice's description line appears only once (not repeated for second edge)
+        assert packed.text.count("[Person] Alice:") == 1
+        # But both relationships reference Alice
+        assert packed.text.count("Alice --[") == 2
+
+    def test_isolated_entities_appended(self):
+        ctx = CommunityContext(
+            community_id="c1",
+            level=0,
+            edges=[
+                EdgeContext(
+                    source=EntityContext(id="e1", name="Alice", description="CEO", labels=["Person"], degree=5),
+                    target=EntityContext(id="e2", name="Acme", description="Tech", labels=["Org"], degree=3),
+                    relationship_type="WORKS_AT",
+                    combined_degree=8,
+                ),
+            ],
+            entities=[
+                EntityContext(id="e3", name="Charlie", description="Intern", labels=["Person"], degree=0),
+            ],
+        )
+        counter = ApproximateTokenCounter(ratio=4.0)
+        full_text = render_community_context(ctx)
+        full_tokens = counter.count(full_text)
+
+        packed = pack_community_context(ctx, max_tokens=full_tokens + 100, counter=counter)
+
+        assert "Charlie" in packed.text
+        assert packed.included_entities >= 1
+
+    def test_packed_token_count_accurate(self):
+        ctx = _make_large_context(5)
+        counter = ApproximateTokenCounter(ratio=4.0)
+
+        packed = pack_community_context(ctx, max_tokens=500, counter=counter)
+
+        # Recount from actual text — allow ±1 token rounding difference
+        actual_tokens = counter.count(packed.text)
+        assert abs(packed.used_tokens - actual_tokens) <= 1
+
+
+class TestSubstituteChildReports:
+    def test_uses_raw_when_fits(self):
+        ctx = _make_large_context(3)
+        counter = ApproximateTokenCounter(ratio=4.0)
+        full_text = render_community_context(ctx)
+        full_tokens = counter.count(full_text)
+
+        result = substitute_child_reports(
+            ctx,
+            child_reports={},
+            max_tokens=full_tokens + 100,
+            counter=counter,
+        )
+
+        assert result.truncated is False
+        assert "Entity0" in result.text
+
+    def test_substitutes_when_raw_too_large(self):
+        ctx = _make_large_context(10)
+        counter = ApproximateTokenCounter(ratio=4.0)
+
+        # Child report is much smaller than raw context
+        child_reports = {
+            "child1": ("Summary of child community 1.", counter.count("Summary of child community 1.")),
+            "child2": ("Summary of child community 2.", counter.count("Summary of child community 2.")),
+        }
+
+        result = substitute_child_reports(
+            ctx,
+            child_reports=child_reports,
+            max_tokens=100,
+            counter=counter,
+        )
+
+        assert result.used_tokens <= 100
+        assert len(result.text) > 0

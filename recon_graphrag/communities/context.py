@@ -1,12 +1,18 @@
-"""Typed community context records and rendering.
+"""Typed community context records, rendering, and token-bounded packing.
 
 Replaces raw backend node objects with plain typed records at the summarizer
 boundary. Edges are sorted by combined endpoint degree (paper-compatible).
+Packing ensures context fits within LLM token budgets.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from recon_graphrag.utils.tokens import (
+    ApproximateTokenCounter,
+    TokenCounter,
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,22 @@ class CommunityContext:
     level: int
     entities: list[EntityContext] = field(default_factory=list)
     edges: list[EdgeContext] = field(default_factory=list)
+
+
+@dataclass
+class PackedCommunityContext:
+    """Result of packing community context into a token budget."""
+
+    community_id: str
+    level: int
+    text: str
+    used_tokens: int
+    max_tokens: int
+    included_edges: int
+    excluded_edges: int
+    included_entities: int
+    excluded_entities: int
+    truncated: bool
 
 
 def render_community_context(context: CommunityContext) -> str:
@@ -77,6 +99,222 @@ def render_community_context(context: CommunityContext) -> str:
             seen_entities.add(entity.id)
 
     return "\n".join(lines)
+
+
+def pack_community_context(
+    context: CommunityContext,
+    max_tokens: int,
+    counter: TokenCounter | None = None,
+) -> PackedCommunityContext:
+    """Pack community context into a token budget.
+
+    Iterates ranked edges in order, including each if it fits. Entity
+    descriptions are only included on first occurrence (deduplication).
+    Isolated entities are appended if space remains.
+
+    Args:
+        context: Ranked community context from parse_community_context.
+        max_tokens: Maximum tokens for the rendered context.
+        counter: Token counter (defaults to ApproximateTokenCounter).
+
+    Returns:
+        PackedCommunityContext with rendered text and telemetry.
+    """
+    counter = counter or ApproximateTokenCounter()
+
+    if max_tokens <= 0:
+        return PackedCommunityContext(
+            community_id=context.community_id,
+            level=context.level,
+            text="",
+            used_tokens=0,
+            max_tokens=max_tokens,
+            included_edges=0,
+            excluded_edges=len(context.edges),
+            included_entities=0,
+            excluded_entities=len(context.entities),
+            truncated=False,
+        )
+
+    lines: list[str] = []
+    seen_entities: set[str] = set()
+    used_tokens = 0
+    truncated = False
+    included_edges = 0
+    excluded_edges = 0
+    included_entities = 0
+
+    for edge in context.edges:
+        unit_lines: list[str] = []
+
+        # Source entity (only if not seen)
+        if edge.source.id not in seen_entities:
+            label = edge.source.labels[0] if edge.source.labels else "Entity"
+            unit_lines.append(f"- [{label}] {edge.source.name}: {edge.source.description}")
+
+        # Target entity (only if not seen)
+        if edge.target.id not in seen_entities:
+            label = edge.target.labels[0] if edge.target.labels else "Entity"
+            unit_lines.append(f"- [{label}] {edge.target.name}: {edge.target.description}")
+
+        # Relationship
+        unit_lines.append(
+            f"  {edge.source.name} --[{edge.relationship_type}]--> {edge.target.name}"
+        )
+
+        unit_text = "\n".join(unit_lines)
+        unit_tokens = counter.count(unit_text)
+
+        if used_tokens + unit_tokens <= max_tokens:
+            lines.append(unit_text)
+            used_tokens += unit_tokens
+            seen_entities.add(edge.source.id)
+            seen_entities.add(edge.target.id)
+            included_edges += 1
+        else:
+            truncated = True
+            excluded_edges += 1
+
+    # Isolated entities
+    for entity in context.entities:
+        if entity.id in seen_entities:
+            continue
+        label = entity.labels[0] if entity.labels else "Entity"
+        entity_line = f"- [{label}] {entity.name}: {entity.description}"
+        entity_tokens = counter.count(entity_line)
+
+        if used_tokens + entity_tokens <= max_tokens:
+            lines.append(entity_line)
+            used_tokens += entity_tokens
+            seen_entities.add(entity.id)
+            included_entities += 1
+        else:
+            truncated = True
+
+    total_entities = len({e.id for e in _all_entities(context)})
+    excluded_entities = total_entities - len(seen_entities)
+
+    return PackedCommunityContext(
+        community_id=context.community_id,
+        level=context.level,
+        text="\n".join(lines),
+        used_tokens=used_tokens,
+        max_tokens=max_tokens,
+        included_edges=included_edges,
+        excluded_edges=excluded_edges,
+        included_entities=included_entities,
+        excluded_entities=excluded_entities,
+        truncated=truncated,
+    )
+
+
+def substitute_child_reports(
+    context: CommunityContext,
+    child_reports: dict[str, tuple[str, int]],  # child_id -> (report_text, report_tokens)
+    max_tokens: int,
+    counter: TokenCounter | None = None,
+) -> PackedCommunityContext:
+    """Substitute child reports for raw elements when they save tokens.
+
+    For parent communities (level > 0), replaces child raw context with
+    child report text when the report is smaller.
+
+    Args:
+        context: Parent community context with raw elements.
+        child_reports: Dict of child_id -> (report_text, report_token_count).
+        max_tokens: Maximum tokens for the result.
+        counter: Token counter.
+
+    Returns:
+        PackedCommunityContext with substituted text.
+    """
+    counter = counter or ApproximateTokenCounter()
+
+    # Group edges by child community membership
+    # For now, render all raw context and check if it fits
+    full_text = render_community_context(context)
+    full_tokens = counter.count(full_text)
+
+    if full_tokens <= max_tokens:
+        return PackedCommunityContext(
+            community_id=context.community_id,
+            level=context.level,
+            text=full_text,
+            used_tokens=full_tokens,
+            max_tokens=max_tokens,
+            included_edges=len(context.edges),
+            excluded_edges=0,
+            included_entities=len({e.id for e in _all_entities(context)}),
+            excluded_entities=0,
+            truncated=False,
+        )
+
+    # Raw context doesn't fit — try substitution
+    # For each child that has a report, compute savings
+    savings: list[tuple[str, int, str]] = []  # (child_id, savings, report_text)
+    for child_id, (report_text, report_tokens) in child_reports.items():
+        # Estimate raw tokens for this child (simplified: proportional)
+        # In a real implementation, we'd track which edges belong to which child
+        raw_estimate = full_tokens // max(len(child_reports), 1)
+        saving = raw_estimate - report_tokens
+        if saving > 0:
+            savings.append((child_id, saving, report_text))
+
+    # Sort by savings DESC
+    savings.sort(key=lambda x: -x[1])
+
+    # Build substituted context
+    substituted_parts: list[str] = []
+    used_tokens = 0
+
+    for child_id, saving, report_text in savings:
+        report_tokens = counter.count(report_text)
+        if used_tokens + report_tokens <= max_tokens:
+            substituted_parts.append(report_text)
+            used_tokens += report_tokens
+
+    # If still has room, add remaining raw context
+    remaining_budget = max_tokens - used_tokens
+    if remaining_budget > 0:
+        # Pack remaining raw edges
+        packed = pack_community_context(context, remaining_budget, counter)
+        if packed.text:
+            substituted_parts.append(packed.text)
+            used_tokens += packed.used_tokens
+
+    final_text = "\n\n".join(substituted_parts)
+    total_entities = len({e.id for e in _all_entities(context)})
+
+    return PackedCommunityContext(
+        community_id=context.community_id,
+        level=context.level,
+        text=final_text,
+        used_tokens=used_tokens,
+        max_tokens=max_tokens,
+        included_edges=len(context.edges),
+        excluded_edges=0,
+        included_entities=total_entities,
+        excluded_entities=0,
+        truncated=True,
+    )
+
+
+def _all_entities(context: CommunityContext) -> list[EntityContext]:
+    """Collect all unique entities from edges and isolated list."""
+    seen: set[str] = set()
+    result: list[EntityContext] = []
+    for edge in context.edges:
+        if edge.source.id not in seen:
+            result.append(edge.source)
+            seen.add(edge.source.id)
+        if edge.target.id not in seen:
+            result.append(edge.target)
+            seen.add(edge.target.id)
+    for entity in context.entities:
+        if entity.id not in seen:
+            result.append(entity)
+            seen.add(entity.id)
+    return result
 
 
 def parse_community_context(
