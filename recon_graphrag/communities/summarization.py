@@ -3,6 +3,9 @@
 For each community, collect its entities and relationships, format as structured
 text, and generate a summary via LLM. This enables global-level retrieval over
 high-level community insights instead of individual nodes.
+
+When ``use_reports=True``, generates structured CommunityReport objects with
+validated findings and references instead of plain-text summaries.
 """
 
 from __future__ import annotations
@@ -12,11 +15,21 @@ from typing import Optional
 
 from recon_graphrag.communities.context import (
     CommunityContext,
+    enrich_context_with_claims,
+    build_reference_ids,
     parse_community_context,
     render_community_context,
 )
+from recon_graphrag.communities.reports import (
+    ReportParser,
+    ReportRubric,
+    ReportValidationError,
+    build_repair_prompt,
+    build_report_prompt,
+)
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse
+from recon_graphrag.models.artifacts import CommunityReport, report_to_text
 
 
 DEFAULT_SUMMARY_PROMPT = """Summarize the following cluster of related entities and their connections.
@@ -44,11 +57,16 @@ class CommunitySummarizer:
         llm: BaseLLM,
         prompt_template: Optional[str] = None,
         graph_name: str = "entity-graph",
+        use_reports: bool = False,
+        report_rubric: ReportRubric | None = None,
     ):
         self.graph_store = graph_store
         self.llm = llm
         self.prompt_template = prompt_template or DEFAULT_SUMMARY_PROMPT
         self.graph_name = graph_name
+        self.use_reports = use_reports
+        self.report_rubric = report_rubric
+        self._report_parser = ReportParser()
 
     async def summarize_all(self, level: int = 0) -> list[dict]:
         """Summarize all communities at a given hierarchy level."""
@@ -62,11 +80,26 @@ class CommunitySummarizer:
             cid = comm["id"]
             print(f"  Summarizing community {cid} ({comm.get('entity_count', 0)} entities)...")
             try:
-                summary = await self.summarize_community(cid, level)
-                if not summary.strip():
-                    continue
-                self.graph_store.store_community_summary(cid, level, summary, self.graph_name)
-                results.append({"id": cid, "level": level, "summary": summary})
+                if self.use_reports:
+                    report = await self.generate_report(cid, level)
+                    summary_text = report_to_text(report)
+                    self.graph_store.store_community_summary(
+                        cid, level, summary_text, self.graph_name
+                    )
+                    results.append({
+                        "id": cid,
+                        "level": level,
+                        "summary": summary_text,
+                        "report": report,
+                    })
+                else:
+                    summary = await self.summarize_community(cid, level)
+                    if not summary.strip():
+                        continue
+                    self.graph_store.store_community_summary(
+                        cid, level, summary, self.graph_name
+                    )
+                    results.append({"id": cid, "level": level, "summary": summary})
             except Exception as e:
                 print(f"  Error summarizing community {cid}: {e}")
         return results
@@ -81,8 +114,80 @@ class CommunitySummarizer:
         response: LLMResponse = await self.llm.ainvoke(prompt)
         return response.content
 
+    async def generate_report(
+        self, community_id: str, level: int = 0
+    ) -> CommunityReport:
+        """Generate a structured community report with validated references.
+
+        Fetches context, builds a structured prompt, parses the LLM response,
+        validates references, and attempts one repair on failure.
+        """
+        # Fetch context with claims
+        context = self._fetch_community_context_obj(community_id, level)
+        if not context.edges and not context.entities:
+            return CommunityReport(
+                id=f"report:{community_id}:{level}",
+                community_id=community_id,
+                level=level,
+                title="Empty community",
+                summary="No entities or relationships found.",
+            )
+
+        # Build reference allowlist
+        reference_ids = build_reference_ids(context)
+        valid_ids = set(reference_ids)
+
+        # Render context text
+        context_text = render_community_context(context)
+
+        # Build prompt
+        prompt = build_report_prompt(
+            community_id=community_id,
+            level=level,
+            context=context_text,
+            reference_ids=reference_ids,
+            rubric=self.report_rubric,
+        )
+
+        # First attempt
+        response: LLMResponse = await self.llm.ainvoke(prompt)
+        try:
+            return self._report_parser.parse(
+                response.content,
+                community_id=community_id,
+                level=level,
+                valid_ids=valid_ids,
+            )
+        except ReportValidationError as e:
+            # One repair attempt
+            print(f"  Report validation failed for {community_id}, attempting repair...")
+            repair_prompt = build_repair_prompt(
+                raw_content=e.raw_content,
+                errors=e.errors,
+                valid_ids=reference_ids,
+                rubric=self.report_rubric,
+            )
+            repair_response = await self.llm.ainvoke(repair_prompt)
+            try:
+                return self._report_parser.parse(
+                    repair_response.content,
+                    community_id=community_id,
+                    level=level,
+                    valid_ids=valid_ids,
+                )
+            except ReportValidationError as e2:
+                print(f"  Repair failed for {community_id}: {e2}")
+                # Return a minimal report with error info
+                return CommunityReport(
+                    id=f"report:{community_id}:{level}",
+                    community_id=community_id,
+                    level=level,
+                    title="Generation failed",
+                    summary=response.content[:500] if response.content else "",
+                )
+
     def _fetch_community_context(self, community_id: str, level: int = 0) -> str:
-        """Fetch context for a community.
+        """Fetch context for a community as rendered text.
 
         Level 0: degree-ranked entities and intra-community relationships.
         Level > 0: child community summaries first, then entity context fallback.
@@ -95,6 +200,41 @@ class CommunitySummarizer:
             return child_context
 
         return self._fetch_ranked_entity_context(community_id, level)
+
+    def _fetch_community_context_obj(
+        self, community_id: str, level: int = 0
+    ) -> CommunityContext:
+        """Fetch context as a typed CommunityContext with claims.
+
+        Used by report generation to get structured context for reference IDs.
+        """
+        rows = self.graph_store.get_community_ranked_context(
+            graph_name=self.graph_name,
+            community_id=community_id,
+            level=level,
+        )
+        context = parse_community_context(community_id, level, rows)
+
+        # Enrich with claims
+        entity_ids = [e.id for e in context.entities]
+        for edge in context.edges:
+            if edge.source.id not in entity_ids:
+                entity_ids.append(edge.source.id)
+            if edge.target.id not in entity_ids:
+                entity_ids.append(edge.target.id)
+
+        if entity_ids:
+            try:
+                claim_rows = self.graph_store.get_claims_for_entities(
+                    graph_name=self.graph_name,
+                    entity_ids=entity_ids,
+                )
+                if claim_rows:
+                    context = enrich_context_with_claims(context, claim_rows)
+            except Exception:
+                pass  # Claims are optional; don't fail report generation
+
+        return context
 
     def _fetch_ranked_entity_context(self, community_id: str, level: int = 0) -> str:
         """Fetch degree-ranked entity and relationship context."""

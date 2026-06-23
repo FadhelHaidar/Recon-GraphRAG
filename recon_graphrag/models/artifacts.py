@@ -120,12 +120,25 @@ class ClaimRecord:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class FindingReference:
+    """A typed reference from a finding to evidence in the community context.
+
+    ``target_id`` is the entity ID, relationship key (``source:type:target``),
+    or claim ID. ``target_type`` distinguishes what kind of evidence it is.
+    """
+
+    target_id: str
+    target_type: str  # "entity", "relationship", "claim"
+
+
 @dataclass
 class CommunityFinding:
     """A single finding within a community report."""
 
     id: str
     description: str
+    references: list[FindingReference] = field(default_factory=list)
     rank: float = 0.0
 
 
@@ -148,6 +161,9 @@ class CommunityReport:
     level: int
     findings: list[CommunityFinding] = field(default_factory=list)
     summary: str = ""
+    title: str = ""
+    rating: float | None = None
+    rating_explanation: str | None = None
     version: ArtifactVersion = field(default_factory=ArtifactVersion)
 
 
@@ -179,8 +195,16 @@ def source_ref(source: SourceReference) -> str:
 def report_to_json(report: CommunityReport) -> str:
     """Serialize a community report to sorted-key JSON."""
 
+    def _ref_dict(r: FindingReference) -> dict[str, Any]:
+        return {"target_id": r.target_id, "target_type": r.target_type}
+
     def _finding_dict(f: CommunityFinding) -> dict[str, Any]:
-        return {"id": f.id, "description": f.description, "rank": f.rank}
+        return {
+            "id": f.id,
+            "description": f.description,
+            "rank": f.rank,
+            "references": [_ref_dict(r) for r in f.references],
+        }
 
     def _version_dict(v: ArtifactVersion) -> dict[str, Any]:
         return {
@@ -194,8 +218,11 @@ def report_to_json(report: CommunityReport) -> str:
         "id": report.id,
         "community_id": report.community_id,
         "level": report.level,
+        "title": report.title,
         "findings": [_finding_dict(f) for f in report.findings],
         "summary": report.summary,
+        "rating": report.rating,
+        "rating_explanation": report.rating_explanation,
         "version": _version_dict(report.version),
     }
     return json.dumps(data, indent=2, sort_keys=True)
@@ -204,12 +231,19 @@ def report_to_json(report: CommunityReport) -> str:
 def report_to_text(report: CommunityReport) -> str:
     """Render a community report as plain text for embeddings.
 
-    Findings are listed first (sorted by rank descending, then id), followed
-    by the summary. This produces a stable text representation suitable for
-    embedding models.
+    Title, summary, rating (if present), and findings in stable order.
+    This produces a stable text representation suitable for embedding models
+    and backward-compatible with semantic global search.
     """
     sorted_findings = sorted(report.findings, key=lambda f: (-f.rank, f.id))
-    lines = [f"Community {report.community_id} (level {report.level})"]
+    lines = []
+    if report.title:
+        lines.append(report.title)
+    lines.append(f"Community {report.community_id} (level {report.level})")
+    if report.rating is not None:
+        lines.append(f"Rating: {report.rating}")
+        if report.rating_explanation:
+            lines.append(report.rating_explanation)
     if sorted_findings:
         lines.append("")
         for f in sorted_findings:
@@ -236,6 +270,7 @@ __all__ = [
     "DescriptionObservation",
     "RelationshipObservation",
     "ClaimRecord",
+    "FindingReference",
     "CommunityFinding",
     "ArtifactVersion",
     "CommunityReport",

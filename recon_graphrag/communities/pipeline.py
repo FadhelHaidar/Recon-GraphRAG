@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from recon_graphrag.communities.embeddings import CommunityEmbedder
+from recon_graphrag.communities.reports import ReportRubric
 from recon_graphrag.communities.summarization import CommunitySummarizer
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
@@ -33,6 +34,8 @@ class CommunityPipeline:
         relationship_weight_property: Optional[str] = None,
         random_seed: Optional[int] = 42,
         summary_prompt: Optional[str] = None,
+        use_reports: bool = False,
+        report_rubric: ReportRubric | None = None,
     ):
         """Initialize the community pipeline.
 
@@ -51,6 +54,8 @@ class CommunityPipeline:
                 unweighted when this is None; Memgraph defaults to "weight".
             random_seed: Random seed for deterministic Neo4j community detection.
             summary_prompt: Optional custom prompt for community summaries.
+            use_reports: Generate structured reports instead of plain summaries.
+            report_rubric: Rating rubric for structured reports.
         """
         self.graph_store = graph_store
         self.llm = llm
@@ -64,6 +69,8 @@ class CommunityPipeline:
         self.relationship_weight_property = relationship_weight_property
         self.random_seed = random_seed
         self.summary_prompt = summary_prompt
+        self.use_reports = use_reports
+        self.report_rubric = report_rubric
 
     async def build(self, level: Optional[int] = None) -> dict:
         """Run steps 4-6: detect communities, summarize, and embed.
@@ -103,6 +110,8 @@ class CommunityPipeline:
             self.llm,
             prompt_template=self.summary_prompt,
             graph_name=self.graph_name,
+            use_reports=self.use_reports,
+            report_rubric=self.report_rubric,
         )
         community_embedder = CommunityEmbedder(
             self.graph_store,

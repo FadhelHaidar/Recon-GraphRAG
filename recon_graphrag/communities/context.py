@@ -38,6 +38,17 @@ class EdgeContext:
     combined_degree: int = 0  # source.degree + target.degree
 
 
+@dataclass(frozen=True)
+class ClaimContext:
+    """Typed claim record for community context."""
+
+    id: str
+    entity_id: str
+    claim_type: str
+    description: str
+    status: str = "active"
+
+
 @dataclass
 class CommunityContext:
     """Typed community context with degree-ranked edges."""
@@ -46,6 +57,7 @@ class CommunityContext:
     level: int
     entities: list[EntityContext] = field(default_factory=list)
     edges: list[EdgeContext] = field(default_factory=list)
+    claims: list[ClaimContext] = field(default_factory=list)
 
 
 @dataclass
@@ -69,6 +81,7 @@ def render_community_context(context: CommunityContext) -> str:
 
     Entities are listed once with their full description. Subsequent references
     use just the name. Relationships are rendered inline with their endpoints.
+    Claims are listed after relationships.
     """
     lines: list[str] = []
     seen_entities: set[str] = set()
@@ -97,6 +110,15 @@ def render_community_context(context: CommunityContext) -> str:
             label = entity.labels[0] if entity.labels else "Entity"
             lines.append(f"- [{label}] {entity.name}: {entity.description}")
             seen_entities.add(entity.id)
+
+    # Add claims
+    if context.claims:
+        lines.append("")
+        lines.append("Claims:")
+        for claim in context.claims:
+            lines.append(
+                f"  [{claim.id}] ({claim.claim_type}) {claim.description}"
+            )
 
     return "\n".join(lines)
 
@@ -396,3 +418,70 @@ def _parse_labels(raw) -> list[str]:
     if isinstance(raw, str):
         return [raw] if raw != "__Entity__" else []
     return []
+
+
+def enrich_context_with_claims(
+    context: CommunityContext,
+    claim_rows: list[dict],
+) -> CommunityContext:
+    """Add claims to an existing CommunityContext.
+
+    Args:
+        context: Parsed community context.
+        claim_rows: Rows from get_claims_for_entities() with keys:
+            claim_id, entity_id, claim_type, description, status, chunk_id.
+
+    Returns:
+        New CommunityContext with claims added.
+    """
+    claims = [
+        ClaimContext(
+            id=row["claim_id"],
+            entity_id=row["entity_id"],
+            claim_type=row.get("claim_type", "general"),
+            description=row.get("description", ""),
+            status=row.get("status", "active"),
+        )
+        for row in claim_rows
+        if row.get("claim_id") and row.get("entity_id")
+    ]
+    return CommunityContext(
+        community_id=context.community_id,
+        level=context.level,
+        entities=context.entities,
+        edges=context.edges,
+        claims=claims,
+    )
+
+
+def build_reference_ids(context: CommunityContext) -> list[str]:
+    """Build the reference ID allowlist from a CommunityContext.
+
+    Returns entity IDs, relationship keys (source:type:target), and claim IDs.
+    """
+    ids: list[str] = []
+
+    # Entity IDs
+    seen_entities: set[str] = set()
+    for edge in context.edges:
+        if edge.source.id not in seen_entities:
+            ids.append(edge.source.id)
+            seen_entities.add(edge.source.id)
+        if edge.target.id not in seen_entities:
+            ids.append(edge.target.id)
+            seen_entities.add(edge.target.id)
+    for entity in context.entities:
+        if entity.id not in seen_entities:
+            ids.append(entity.id)
+            seen_entities.add(entity.id)
+
+    # Relationship keys
+    for edge in context.edges:
+        rel_key = f"{edge.source.id}:{edge.relationship_type}:{edge.target.id}"
+        ids.append(rel_key)
+
+    # Claim IDs
+    for claim in context.claims:
+        ids.append(claim.id)
+
+    return ids
