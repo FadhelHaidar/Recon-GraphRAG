@@ -585,10 +585,6 @@ def test_build_from_text_stamps_graph_name_on_all_records():
     assert all(link.graph_name == "custom-graph" for link in doc.evidence_links)
 
 
-@pytest.mark.characterization(
-    reason="Pipeline passes graph_name through; writer MERGE does not scope by graph. "
-    "Phase 2 will address graph identity."
-)
 def test_pipeline_rerun_does_not_inflate_assembled_records():
     """Characterization: assembler-level rerun produces the same record counts."""
     from recon_graphrag.extraction.chunking import TextChunk
