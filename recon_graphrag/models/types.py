@@ -16,6 +16,7 @@ class SearchResult:
     answer: str
     context: str = ""
     citations: list[Citation] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
     def __str__(self) -> str:
         return f"[{self.mode.upper()}] {self.answer}"

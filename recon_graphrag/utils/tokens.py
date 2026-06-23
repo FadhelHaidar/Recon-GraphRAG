@@ -106,94 +106,6 @@ def create_token_counter(name: str = "approximate", **kwargs) -> TokenCounter:
     raise ValueError(f"Unknown token counter: {name!r}")
 
 
-@dataclass(frozen=True)
-class PackItem:
-    """A single unit that can be packed into a token budget."""
-
-    id: str
-    text: str
-    priority: float = 0.0
-
-
-@dataclass(frozen=True)
-class PackResult:
-    """Result of packing items into a token budget."""
-
-    included: list[PackItem]
-    excluded: list[PackItem]
-    used_tokens: int
-    max_tokens: int
-    truncated_item_ids: list[str]
-
-
-class TokenPacker:
-    """Greedy token-budgeted packer.
-
-    Items are considered in the order supplied; the caller is responsible for
-    ranking/prioritization. The packer either includes an item whole, truncates
-    it to fit (when enabled), or stops and excludes the rest.
-    """
-
-    def __init__(
-        self,
-        counter: TokenCounter | None = None,
-        *,
-        truncate: bool = True,
-    ):
-        self._counter = counter or ApproximateTokenCounter()
-        self._truncate = truncate
-
-    def pack(self, items: list[PackItem], max_tokens: int) -> PackResult:
-        """Pack ``items`` into ``max_tokens``.
-
-        Raises ``ValueError`` if ``max_tokens`` is not positive.
-        """
-        if max_tokens <= 0:
-            raise ValueError("max_tokens must be > 0")
-
-        included: list[PackItem] = []
-        excluded: list[PackItem] = []
-        truncated_item_ids: list[str] = []
-        remaining = max_tokens
-        stopped = False
-
-        for item in items:
-            if stopped:
-                excluded.append(item)
-                continue
-
-            count = self._counter.count(item.text)
-            if count <= remaining:
-                included.append(item)
-                remaining -= count
-                continue
-
-            if self._truncate and remaining > 0:
-                truncated_text = self._counter.truncate(item.text, remaining)
-                if truncated_text:
-                    included.append(
-                        PackItem(id=item.id, text=truncated_text, priority=item.priority)
-                    )
-                    truncated_item_ids.append(item.id)
-                    remaining = 0
-                # Whether or not anything fit, the budget is exhausted.
-                stopped = True
-            else:
-                stopped = True
-
-            if stopped:
-                excluded.append(item)
-
-        used_tokens = max_tokens - remaining
-        return PackResult(
-            included=included,
-            excluded=excluded,
-            used_tokens=used_tokens,
-            max_tokens=max_tokens,
-            truncated_item_ids=truncated_item_ids,
-        )
-
-
 def count_tokens(text: str, counter: TokenCounter | None = None) -> int:
     """Convenience helper: count tokens in ``text``."""
     return (counter or ApproximateTokenCounter()).count(text)
@@ -209,9 +121,6 @@ __all__ = [
     "ApproximateTokenCounter",
     "TiktokenTokenCounter",
     "create_token_counter",
-    "PackItem",
-    "PackResult",
-    "TokenPacker",
     "count_tokens",
     "truncate_text",
 ]

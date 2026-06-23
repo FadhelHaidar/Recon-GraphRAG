@@ -1,4 +1,4 @@
-"""Tests for token counting and packing utilities."""
+"""Tests for token counting utilities."""
 
 from __future__ import annotations
 
@@ -7,23 +7,10 @@ import pytest
 from recon_graphrag.config.settings import BudgetConfig, PipelineConfig
 from recon_graphrag.utils.tokens import (
     ApproximateTokenCounter,
-    PackItem,
-    TokenCounter,
-    TokenPacker,
     count_tokens,
     create_token_counter,
     truncate_text,
 )
-
-
-class ConstantTokenCounter(TokenCounter):
-    """Test counter that counts one token per character."""
-
-    def count(self, text: str) -> int:
-        return len(text)
-
-    def truncate(self, text: str, max_tokens: int) -> str:
-        return text[:max_tokens]
 
 
 class TestApproximateTokenCounter:
@@ -96,93 +83,6 @@ class TestCreateTokenCounter:
         # tiktoken is not a mandatory dependency; this test documents the error.
         with pytest.raises(ImportError):
             create_token_counter("tiktoken")
-
-
-class TestTokenPacker:
-    def test_empty_items(self):
-        packer = TokenPacker()
-        result = packer.pack([], max_tokens=10)
-        assert result.included == []
-        assert result.excluded == []
-        assert result.used_tokens == 0
-
-    def test_all_items_fit(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter)
-        items = [PackItem(id="a", text="ab"), PackItem(id="b", text="cd")]
-        result = packer.pack(items, max_tokens=4)
-        assert [i.id for i in result.included] == ["a", "b"]
-        assert result.excluded == []
-        assert result.used_tokens == 4
-
-    def test_stops_when_budget_exhausted(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter, truncate=False)
-        items = [
-            PackItem(id="a", text="ab"),
-            PackItem(id="b", text="cd"),
-            PackItem(id="c", text="ef"),
-        ]
-        result = packer.pack(items, max_tokens=3)
-        assert [i.id for i in result.included] == ["a"]
-        assert [i.id for i in result.excluded] == ["b", "c"]
-        assert result.used_tokens == 2
-
-    def test_truncates_remaining_item_when_enabled(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter, truncate=True)
-        items = [
-            PackItem(id="a", text="ab"),
-            PackItem(id="b", text="cd"),
-        ]
-        result = packer.pack(items, max_tokens=3)
-        assert [i.id for i in result.included] == ["a", "b"]
-        assert result.included[1].text == "c"
-        assert result.truncated_item_ids == ["b"]
-        assert result.used_tokens == 3
-
-    def test_truncates_last_fitting_item(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter, truncate=True)
-        items = [PackItem(id="a", text="ab"), PackItem(id="b", text="cdef")]
-        result = packer.pack(items, max_tokens=3)
-        assert [i.id for i in result.included] == ["a", "b"]
-        assert result.included[1].text == "c"
-        assert result.truncated_item_ids == ["b"]
-        assert result.used_tokens == 3
-
-    def test_no_truncate_policy_excludes_item(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter, truncate=False)
-        items = [PackItem(id="a", text="ab"), PackItem(id="b", text="cdef")]
-        result = packer.pack(items, max_tokens=3)
-        assert [i.id for i in result.included] == ["a"]
-        assert [i.id for i in result.excluded] == ["b"]
-        assert result.truncated_item_ids == []
-
-    def test_single_oversized_item_truncates(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter, truncate=True)
-        items = [PackItem(id="big", text="abcdefghij")]
-        result = packer.pack(items, max_tokens=4)
-        assert len(result.included) == 1
-        assert result.included[0].text == "abcd"
-        assert result.truncated_item_ids == ["big"]
-
-    def test_single_oversized_item_excluded_when_no_truncate(self):
-        counter = ConstantTokenCounter()
-        packer = TokenPacker(counter, truncate=False)
-        items = [PackItem(id="big", text="abcdefghij")]
-        result = packer.pack(items, max_tokens=4)
-        assert result.included == []
-        assert [i.id for i in result.excluded] == ["big"]
-
-    def test_max_tokens_must_be_positive(self):
-        packer = TokenPacker()
-        with pytest.raises(ValueError):
-            packer.pack([], max_tokens=0)
-        with pytest.raises(ValueError):
-            packer.pack([], max_tokens=-1)
 
 
 class TestConvenienceFunctions:

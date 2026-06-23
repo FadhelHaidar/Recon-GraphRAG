@@ -38,7 +38,10 @@ class FakeGraphStore:
     def __init__(self, reports: list[dict] | None = None):
         self._reports = _make_reports() if reports is None else reports
 
-    def get_community_summaries_by_keys(self, graph_name, keys, top_k):
+    def execute_query(self, query, params=None):
+        level = params.get("level") if params else None
+        if level is not None:
+            return [r for r in self._reports if r.get("level") == level]
         return self._reports
 
 
