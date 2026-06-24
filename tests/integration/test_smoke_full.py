@@ -29,37 +29,72 @@ from tests.integration.support import require_integration_env, require_selected_
 # 5-page corpus covering key entities and cross-document observations
 SMOKE_PAGES = [
     # Page 1: Nolan, Interstellar, Hathaway, Zimmer
-    """
-    Christopher Nolan directed Interstellar (2014), a science-fiction film starring
-    Matthew McConaughey, Anne Hathaway, Jessica Chastain, and Casey Affleck.
-    Hans Zimmer composed the score for Interstellar. Zimmer's scores often use
-    Shepard tones, a musical illusion associated with rising tension.
-    """,
+    {
+        "text": """
+        Christopher Nolan directed Interstellar (2014), a science-fiction film starring
+        Matthew McConaughey, Anne Hathaway, Jessica Chastain, and Casey Affleck.
+        Hans Zimmer composed the score for Interstellar. Zimmer's scores often use
+        Shepard tones, a musical illusion associated with rising tension.
+        """,
+        "metadata": {
+            "record_id": "movie-page-001",
+            "source": "movie-page-001",
+            "collection": "movie-smoke-pages",
+        },
+    },
     # Page 2: Inception, DiCaprio, Zimmer again (cross-doc observation)
-    """
-    Leonardo DiCaprio starred in Inception (2010), directed by Christopher Nolan.
-    DiCaprio played Dom Cobb, a thief who extracts secrets through dream-sharing
-    technology. Hans Zimmer also composed the score for Inception, using deep brass
-    sounds and auditory tension.
-    """,
+    {
+        "text": """
+        Leonardo DiCaprio starred in Inception (2010), directed by Christopher Nolan.
+        DiCaprio played Dom Cobb, a thief who extracts secrets through dream-sharing
+        technology. Hans Zimmer also composed the score for Inception, using deep brass
+        sounds and auditory tension.
+        """,
+        "metadata": {
+            "record_id": "movie-page-002",
+            "source": "movie-page-002",
+            "collection": "movie-smoke-pages",
+        },
+    },
     # Page 3: Dark Knight Rises, Hardy, Murphy, Hathaway again
-    """
-    The Dark Knight Rises (2012) was directed by Christopher Nolan and featured
-    Christian Bale as Batman, Tom Hardy as Bane, and Anne Hathaway as Selina Kyle.
-    Cillian Murphy appeared as Dr. Jonathan Crane, also known as Scarecrow.
-    """,
+    {
+        "text": """
+        The Dark Knight Rises (2012) was directed by Christopher Nolan and featured
+        Christian Bale as Batman, Tom Hardy as Bane, and Anne Hathaway as Selina Kyle.
+        Cillian Murphy appeared as Dr. Jonathan Crane, also known as Scarecrow.
+        """,
+        "metadata": {
+            "record_id": "movie-page-003",
+            "source": "movie-page-003",
+            "collection": "movie-smoke-pages",
+        },
+    },
     # Page 4: Dune, Villeneuve, Zimmer again, Chalamet
-    """
-    Denis Villeneuve directed Dune (2021), a science-fiction epic starring
-    Timothee Chalamet as Paul Atreides. Hans Zimmer composed the score for Dune,
-    connecting it to Interstellar and Inception through his musical style.
-    """,
+    {
+        "text": """
+        Denis Villeneuve directed Dune (2021), a science-fiction epic starring
+        Timothee Chalamet as Paul Atreides. Hans Zimmer composed the score for Dune,
+        connecting it to Interstellar and Inception through his musical style.
+        """,
+        "metadata": {
+            "record_id": "movie-page-004",
+            "source": "movie-page-004",
+            "collection": "movie-smoke-pages",
+        },
+    },
     # Page 5: Oppenheimer, Murphy again, awards
-    """
-    Oppenheimer (2023) was directed by Christopher Nolan and starred Cillian
-    Murphy as J. Robert Oppenheimer. The film won the Oscar for Best Picture
-    at the 2024 Academy Awards. Hoyte van Hoytema served as cinematographer.
-    """,
+    {
+        "text": """
+        Oppenheimer (2023) was directed by Christopher Nolan and starred Cillian
+        Murphy as J. Robert Oppenheimer. The film won the Oscar for Best Picture
+        at the 2024 Academy Awards. Hoyte van Hoytema served as cinematographer.
+        """,
+        "metadata": {
+            "record_id": "movie-page-005",
+            "source": "movie-page-005",
+            "collection": "movie-smoke-pages",
+        },
+    },
 ]
 
 
@@ -128,7 +163,11 @@ async def _run_smoke_pipeline(store, graph_name: str):
         )
         build_result = await builder.build_from_pages(
             SMOKE_PAGES,
-            metadata={"source": f"{graph_name}-source"},
+            metadata={
+                "source": f"{graph_name}-source",
+                "collection": "movie-smoke-document",
+                "external_id": f"{graph_name}-external",
+            },
             window_size=2,
             window_overlap=1,
         )
@@ -214,6 +253,12 @@ async def _run_smoke_pipeline(store, graph_name: str):
             await graph_rag.search(
                 "Which movies were directed by Christopher Nolan?",
                 mode="local",
+                synthesize_citation_metadata=True,
+                synthesis_metadata_keys=[
+                    "record_ids",
+                    "collections",
+                    "external_id",
+                ],
             ),
             await graph_rag.search(
                 "What are the most common themes across science-fiction films?",
@@ -224,6 +269,12 @@ async def _run_smoke_pipeline(store, graph_name: str):
                 "How does Hans Zimmer connect Inception to Dune?",
                 mode="drift",
                 community_level="finest",
+                synthesize_citation_metadata=True,
+                synthesis_metadata_keys=[
+                    "record_ids",
+                    "collections",
+                    "external_id",
+                ],
             ),
             await graph_rag.search(
                 "What are common themes in science-fiction films?",
@@ -236,6 +287,21 @@ async def _run_smoke_pipeline(store, graph_name: str):
 
         for result in results:
             assert result.answer.strip(), f"Empty answer for {result.mode} search"
+
+        # Validate source metadata survives into citation envelopes.
+        for result in (results[0], results[2]):
+            assert result.citations, f"Expected citations for {result.mode} search"
+            citation = result.citations[0]
+            assert citation.metadata.get("external_id") == f"{graph_name}-external"
+            assert citation.metadata.get("collection") == "movie-smoke-document"
+            assert citation.metadata.get("collections") == ["movie-smoke-pages"]
+            assert citation.metadata.get("record_ids"), (
+                f"Missing record_ids in {result.mode} citation metadata"
+            )
+            assert all(
+                record_id.startswith("movie-page-")
+                for record_id in citation.metadata["record_ids"]
+            )
 
         # Validate paper search diagnostics
         paper_result = results[3]

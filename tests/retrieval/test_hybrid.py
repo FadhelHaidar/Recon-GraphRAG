@@ -247,3 +247,43 @@ async def test_local_search_uses_internal_retriever_and_llm():
         "graph_name": "entity-graph",
         "chunk_ids": ["chunk:1"],
     }
+
+
+@pytest.mark.asyncio
+async def test_local_search_can_include_citation_metadata_in_prompt():
+    store = FakeGraphStore()
+    embedder = FakeEmbedder()
+    llm = FakeLLM()
+    retriever = LocalSearchRetriever(store, llm, embedder)
+
+    result = await retriever.search(
+        "Who directed Inception?",
+        top_k=2,
+        synthesize_citation_metadata=True,
+        synthesis_metadata_keys=["record_id", "collection"],
+    )
+
+    assert "Citation metadata:" in result.context
+    assert '"record_id": "row-42"' in result.context
+    assert '"collection": "movies"' in result.context
+    assert "row-source" not in result.context
+    assert "Citation metadata:" in llm.prompts[0]
+    assert '"record_id": "row-42"' in llm.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_local_search_accepts_legacy_include_citation_metadata_alias():
+    store = FakeGraphStore()
+    embedder = FakeEmbedder()
+    llm = FakeLLM()
+    retriever = LocalSearchRetriever(store, llm, embedder)
+
+    result = await retriever.search(
+        "Who directed Inception?",
+        top_k=2,
+        include_citation_metadata=True,
+        citation_metadata_keys=["record_id"],
+    )
+
+    assert "Citation metadata:" in result.context
+    assert '"record_id": "row-42"' in llm.prompts[0]

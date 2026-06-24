@@ -26,7 +26,10 @@ from recon_graphrag.retrieval.community_levels import (
 )
 from recon_graphrag.retrieval.citations import resolve_chunk_citations
 from recon_graphrag.retrieval.hybrid import HybridEntityRetriever, HybridRanker
-from recon_graphrag.retrieval.local import _source_chunk_ids_from_result
+from recon_graphrag.retrieval.local import (
+    _format_citation_metadata,
+    _source_chunk_ids_from_result,
+)
 
 
 DEFAULT_ANSWER_PROMPT = """You have access to detailed findings and broader context.
@@ -96,6 +99,10 @@ class DriftSearchRetriever(BaseRetriever):
         query_params: dict | None = None,
         ranker: HybridRanker | str = "naive",
         alpha: float | None = None,
+        synthesize_citation_metadata: bool = False,
+        synthesis_metadata_keys: list[str] | None = None,
+        include_citation_metadata: bool | None = None,
+        citation_metadata_keys: list[str] | None = None,
     ) -> SearchResult:
         """Run DRIFT search.
 
@@ -115,7 +122,22 @@ class DriftSearchRetriever(BaseRetriever):
             alpha=alpha,
         )
 
-        entity_context = self._format_entity_context(retriever_result)
+        synthesize_metadata = (
+            synthesize_citation_metadata
+            if include_citation_metadata is None
+            else include_citation_metadata
+        )
+        metadata_keys = (
+            synthesis_metadata_keys
+            if synthesis_metadata_keys is not None
+            else citation_metadata_keys
+        )
+        citations = self._resolve_citations(retriever_result) if synthesize_metadata else []
+        entity_context = self._format_entity_context(
+            retriever_result,
+            citations=citations if synthesize_metadata else None,
+            citation_metadata_keys=metadata_keys,
+        )
         target_selector = self.community_level if community_level is None else community_level
         target_level = resolve_community_level(
             self.graph_store,
@@ -138,7 +160,8 @@ class DriftSearchRetriever(BaseRetriever):
         )
 
         full_context = f"{entity_context}\n\n{community_context}\n\n{bridging_context}"
-        citations = self._resolve_citations(retriever_result)
+        if not synthesize_metadata:
+            citations = self._resolve_citations(retriever_result)
         return SearchResult(
             query=query,
             mode="drift",
@@ -147,7 +170,17 @@ class DriftSearchRetriever(BaseRetriever):
             citations=citations,
         )
 
-    def _format_entity_context(self, retriever_result) -> str:
+    def _format_entity_context(
+        self,
+        retriever_result,
+        *,
+        citations=None,
+        citation_metadata_keys: list[str] | None = None,
+    ) -> str:
+        citation_lines = _format_citation_metadata(
+            citations or [],
+            citation_metadata_keys,
+        )
         parts = []
         for item in retriever_result.items:
             content = item.content
@@ -162,6 +195,11 @@ class DriftSearchRetriever(BaseRetriever):
                     section += "\n  Connections:\n    " + "\n    ".join(rels)
                 if sources:
                     section += "\n  Evidence:\n    " + "\n    ".join(sources[:2])
+                if citation_lines:
+                    section += (
+                        "\n  Citation metadata:\n    "
+                        + "\n    ".join(citation_lines)
+                    )
                 parts.append(section)
         return "\n\n".join(parts)
 

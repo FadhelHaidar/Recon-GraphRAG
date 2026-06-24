@@ -60,7 +60,14 @@ class FakeGraphStore:
                 {"graph_name": graph_name, "chunk_ids": chunk_ids},
             )
         )
-        return [{"document_id": "doc:1", "chunk_id": "chunk:1"}]
+        return [
+            {
+                "document_id": "doc:1",
+                "chunk_id": "chunk:1",
+                "document_metadata": {"collection": "movies"},
+                "chunk_metadata": {"record_id": "row-42", "source": "row-source"},
+            }
+        ]
 
 
 class FakeEmbedder:
@@ -69,7 +76,11 @@ class FakeEmbedder:
 
 
 class FakeLLM:
+    def __init__(self):
+        self.prompts = []
+
     async def ainvoke(self, prompt):
+        self.prompts.append(prompt)
         return LLMResponse(content="answer")
 
 
@@ -134,9 +145,10 @@ async def test_global_search_accepts_coarsest_alias():
 @pytest.mark.asyncio
 async def test_drift_search_accepts_coarsest_alias():
     store = FakeGraphStore()
+    llm = FakeLLM()
     retriever = object.__new__(DriftSearchRetriever)
     retriever.graph_store = store
-    retriever.llm = FakeLLM()
+    retriever.llm = llm
     retriever.graph_name = "entity-graph"
     retriever.community_level = "coarsest"
     retriever.answer_prompt = "{query}\n{entity_context}\n{community_context}\n{bridging_context}"
@@ -149,7 +161,13 @@ async def test_drift_search_accepts_coarsest_alias():
         Citation(
             document_id="doc:1",
             chunk_id="chunk:1",
-            metadata={"document_id": "doc:1", "chunk_id": "chunk:1"},
+            metadata={
+                "collection": "movies",
+                "record_id": "row-42",
+                "source": "row-source",
+                "document_id": "doc:1",
+                "chunk_id": "chunk:1",
+            },
         )
     ]
     summary_call = [
@@ -161,3 +179,29 @@ async def test_drift_search_accepts_coarsest_alias():
         "graph_name": "entity-graph",
         "chunk_ids": ["chunk:1"],
     }
+
+
+@pytest.mark.asyncio
+async def test_drift_search_can_include_citation_metadata_in_prompt():
+    store = FakeGraphStore()
+    llm = FakeLLM()
+    retriever = object.__new__(DriftSearchRetriever)
+    retriever.graph_store = store
+    retriever.llm = llm
+    retriever.graph_name = "entity-graph"
+    retriever.community_level = "coarsest"
+    retriever.answer_prompt = "{query}\n{entity_context}\n{community_context}\n{bridging_context}"
+    retriever._retriever = FakeHybridRetriever()
+
+    result = await retriever.search(
+        "themes",
+        top_k=1,
+        synthesize_citation_metadata=True,
+        synthesis_metadata_keys=["record_id", "collection"],
+    )
+
+    assert "Citation metadata:" in result.context
+    assert '"record_id": "row-42"' in result.context
+    assert '"collection": "movies"' in result.context
+    assert "row-source" not in result.context
+    assert "Citation metadata:" in llm.prompts[0]

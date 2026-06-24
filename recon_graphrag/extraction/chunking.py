@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -171,7 +171,7 @@ class PageWindowBuilder:
 
     def build_windows(
         self,
-        pages: list[str],
+        pages: list[str | dict],
         document_id: str,
         metadata: dict | None = None,
     ) -> list[TextChunk]:
@@ -181,7 +181,8 @@ class PageWindowBuilder:
 
         for index, start in enumerate(range(0, len(pages), step)):
             end = min(start + self.window_size, len(pages))
-            text = "\n\n".join(pages[start:end])
+            window_pages = pages[start:end]
+            text = "\n\n".join(_page_text(page) for page in window_pages)
             if not text.strip():
                 continue
 
@@ -192,6 +193,7 @@ class PageWindowBuilder:
                     index=index,
                     metadata={
                         **metadata,
+                        **_window_metadata(window_pages),
                         "page_start": start + 1,
                         "page_end": end,
                     },
@@ -202,3 +204,58 @@ class PageWindowBuilder:
                 break
 
         return chunks
+
+
+def _page_text(page: str | dict) -> str:
+    if isinstance(page, str):
+        return page
+    if isinstance(page, dict):
+        return str(page.get("text", ""))
+    return str(page)
+
+
+def _page_metadata(page: str | dict) -> dict[str, Any]:
+    if isinstance(page, dict):
+        metadata = page.get("metadata")
+        if isinstance(metadata, dict):
+            return metadata
+    return {}
+
+
+def _window_metadata(pages: list[str | dict]) -> dict[str, Any]:
+    page_metadata = [_page_metadata(page) for page in pages]
+    page_metadata = [metadata for metadata in page_metadata if metadata]
+    if not page_metadata:
+        return {}
+
+    window_metadata = {}
+
+    record_ids = [
+        str(metadata["record_id"])
+        for metadata in page_metadata
+        if metadata.get("record_id") is not None
+    ]
+    if record_ids:
+        window_metadata["record_ids"] = record_ids
+
+    source_ids = []
+    for metadata in page_metadata:
+        source_id = (
+            metadata.get("source")
+            or metadata.get("record_id")
+            or metadata.get("id")
+        )
+        if source_id is not None:
+            source_ids.append(str(source_id))
+    if source_ids:
+        window_metadata["source_ids"] = source_ids
+
+    collections = [
+        str(metadata["collection"])
+        for metadata in page_metadata
+        if metadata.get("collection") is not None
+    ]
+    if collections:
+        window_metadata["collections"] = list(dict.fromkeys(collections))
+
+    return window_metadata

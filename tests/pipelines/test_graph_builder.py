@@ -204,6 +204,40 @@ async def test_build_from_pages_with_windows(
 
 
 @pytest.mark.asyncio
+async def test_build_from_pages_preserves_page_metadata(
+    movie_schema, fake_llm, fake_embedder, fake_writer
+):
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=fake_llm,
+        embedder=fake_embedder,
+        schema=movie_schema,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+    )
+
+    pages = [
+        {"text": "Page one", "metadata": {"record_id": "page-1"}},
+        {"text": "Page two", "metadata": {"record_id": "page-2"}},
+        {"text": "Page three", "metadata": {"record_id": "page-3"}},
+    ]
+    await pipeline.build_from_pages(
+        pages=pages,
+        metadata={"source": "document-source", "collection": "movies"},
+        window_size=2,
+        window_overlap=1,
+    )
+
+    graph_document = fake_writer.write_graph_document.call_args.args[0]
+    assert graph_document.document.metadata["source"] == "document-source"
+    assert graph_document.chunks[0].text == "Page one\n\nPage two"
+    assert graph_document.chunks[0].metadata["record_ids"] == ["page-1", "page-2"]
+    assert graph_document.chunks[1].metadata["record_ids"] == ["page-2", "page-3"]
+
+
+@pytest.mark.asyncio
 async def test_build_from_documents(
     movie_schema, fake_llm, fake_embedder, fake_writer
 ):

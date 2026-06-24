@@ -15,7 +15,11 @@ import re
 from typing import Optional
 
 from recon_graphrag.communities.embeddings import CommunityEmbedder
-from recon_graphrag.extraction.chunking import TextChunker, PageWindowBuilder
+from recon_graphrag.extraction.chunking import (
+    PageWindowBuilder,
+    TextChunker,
+    _page_text,
+)
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
 from recon_graphrag.extraction.schema import GraphSchema
 from recon_graphrag.extraction.assembler import GraphDocumentAssembler
@@ -130,14 +134,14 @@ class GraphBuilderPipeline:
 
     async def build_from_pages(
         self,
-        pages: list[str],
+        pages: list[str | dict],
         metadata: Optional[dict] = None,
         window_size: int = 2,
         window_overlap: int = 1,
     ) -> dict:
         """Build knowledge graph from paginated text using sliding windows."""
         metadata = metadata or {}
-        text = "\n\n".join(pages)
+        text = "\n\n".join(_page_text(page) for page in pages)
         document_id = self._make_document_id(text=text, metadata=metadata)
         text_hash = self._hash_text(text)
 

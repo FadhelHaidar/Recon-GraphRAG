@@ -42,6 +42,18 @@ result = await graph_rag.search(
 | `alpha` | Required for the `"linear"` ranker. |
 
 Local search returns citations when retrieved entities have source chunks.
+By default, citation metadata is returned after synthesis but is not shown to
+the LLM. Opt in when the answer should see source identifiers while being
+written:
+
+```python
+result = await graph_rag.search(
+    "Who directed Inception?",
+    mode="local",
+    include_citation_metadata=True,
+    citation_metadata_keys=["record_id", "collection"],
+)
+```
 
 ## Global Search
 
@@ -118,6 +130,9 @@ result = await graph_rag.search(
 
 DRIFT returns citations for the retrieved local source chunks. Community-summary
 citations are a separate extension point.
+Like local search, DRIFT accepts `include_citation_metadata=True` and optional
+`citation_metadata_keys=[...]` to include compact citation metadata in the
+answer synthesis context.
 
 ## Citations And Sources
 
@@ -167,6 +182,11 @@ await pipeline.build_from_text(
 The same keys are returned on `citation.metadata`, so callers can use
 `citation.metadata["record_id"]` as the source identifier even when no document
 page metadata exists.
+
+Citation metadata is normally returned in the response envelope after answer
+synthesis. For Local and DRIFT search, set `include_citation_metadata=True` to
+also include compact citation metadata in the LLM context. Use
+`citation_metadata_keys` to keep that prompt context small.
 
 Current citation behavior:
 

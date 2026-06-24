@@ -10,11 +10,13 @@ answers anchored to particular entities and their local graph neighborhood.
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
+from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.models.types import SearchResult
 from recon_graphrag.retrieval.base import BaseRetriever
 from recon_graphrag.retrieval.citations import resolve_chunk_citations
@@ -78,6 +80,10 @@ class LocalSearchRetriever(BaseRetriever):
         query_params: dict | None = None,
         ranker: HybridRanker | str = "naive",
         alpha: float | None = None,
+        synthesize_citation_metadata: bool = False,
+        synthesis_metadata_keys: list[str] | None = None,
+        include_citation_metadata: bool | None = None,
+        citation_metadata_keys: list[str] | None = None,
     ) -> SearchResult:
         """Run local search: vector search on entities → subgraph traversal → LLM answer."""
         retriever_result = await self._retriever.search(
@@ -89,9 +95,23 @@ class LocalSearchRetriever(BaseRetriever):
             ranker=ranker,
             alpha=alpha,
         )
-        context = self._format_context(retriever_result)
-        answer = await self._generate_answer(query, context)
+        synthesize_metadata = (
+            synthesize_citation_metadata
+            if include_citation_metadata is None
+            else include_citation_metadata
+        )
+        metadata_keys = (
+            synthesis_metadata_keys
+            if synthesis_metadata_keys is not None
+            else citation_metadata_keys
+        )
         citations = self._resolve_citations(retriever_result)
+        context = self._format_context(
+            retriever_result,
+            citations=citations if synthesize_metadata else None,
+            citation_metadata_keys=metadata_keys,
+        )
+        answer = await self._generate_answer(query, context)
         return SearchResult(
             query=query,
             mode="local",
@@ -100,8 +120,18 @@ class LocalSearchRetriever(BaseRetriever):
             citations=citations,
         )
 
-    def _format_context(self, retriever_result) -> str:
+    def _format_context(
+        self,
+        retriever_result,
+        *,
+        citations: list[Citation] | None = None,
+        citation_metadata_keys: list[str] | None = None,
+    ) -> str:
         """Format retriever results into a context string for the LLM."""
+        citation_lines = _format_citation_metadata(
+            citations or [],
+            citation_metadata_keys,
+        )
         parts = []
         for item in retriever_result.items:
             content = item.content
@@ -116,6 +146,8 @@ class LocalSearchRetriever(BaseRetriever):
                     section += "\nConnections:\n  " + "\n  ".join(rels)
                 if sources:
                     section += "\nEvidence:\n  " + "\n  ".join(sources[:3])
+                if citation_lines:
+                    section += "\nCitation metadata:\n  " + "\n  ".join(citation_lines)
                 parts.append(section)
         return "\n\n---\n\n".join(parts)
 
@@ -151,3 +183,29 @@ def _source_chunk_ids_from_result(retriever_result) -> list[str]:
             seen.add(chunk_id)
             chunk_ids.append(chunk_id)
     return chunk_ids
+
+
+def _format_citation_metadata(
+    citations: list[Citation],
+    metadata_keys: list[str] | None = None,
+) -> list[str]:
+    lines = []
+    key_filter = set(metadata_keys or [])
+    for citation in citations:
+        metadata = dict(citation.metadata or {})
+        if key_filter:
+            metadata = {
+                key: value
+                for key, value in metadata.items()
+                if key in key_filter
+            }
+        if not metadata:
+            continue
+        metadata_text = json.dumps(
+            metadata,
+            ensure_ascii=True,
+            sort_keys=True,
+            default=str,
+        )
+        lines.append(f"{citation.chunk_id}: {metadata_text}")
+    return lines
