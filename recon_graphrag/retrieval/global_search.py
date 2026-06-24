@@ -189,20 +189,16 @@ class GlobalSearchRetriever(BaseRetriever):
     async def search(
         self,
         query: str,
-        top_k: int = 5,
         level: CommunityLevelSelector = None,
         community_level: CommunityLevelSelector = None,
         random_seed: int | None = 42,
-        **kwargs,
     ) -> SearchResult:
         """Run global search over community reports.
 
         Args:
             query: User question.
-            top_k: Unused, kept for API compatibility.
             level/community_level: Community hierarchy level.
             random_seed: Seed for reproducible report shuffling.
-            **kwargs: Ignored (accepted for backwards compatibility).
         """
         start = time.monotonic()
         diag = GlobalSearchDiagnostics(random_seed=random_seed)

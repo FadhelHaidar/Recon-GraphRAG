@@ -71,6 +71,13 @@ class FakeGraphStore:
 
     def execute_query(self, query: str, parameters: dict | None = None):
         self.calls.append(("execute_query", {"query": query.strip(), "params": parameters or {}}))
+        params = parameters or {}
+        # Global search reads reports at a level
+        if "Community" in query and "report_text" in query:
+            level = params.get("level", 0)
+            return [
+                c for c in self._communities if c.get("level") == level
+            ]
         return []
 
     def search_communities(self, index_name, query_vector, graph_name, top_k, level=None):
@@ -210,29 +217,34 @@ async def run_baseline(
         try:
             search_result = await retriever.search(
                 question,
-                top_k=search_config.top_k,
                 level=search_config.level,
             )
             answer = search_result.answer
-            # Re-run retrieval to capture the raw retrieved contexts without
-            # changing the production SearchResult type.
-            query_vector = await embedder.async_embed_query(question)
-            raw_communities = graph_store.search_communities(
-                index_name=retriever.vector_index_name,
-                query_vector=query_vector,
-                graph_name=retriever.graph_name,
-                top_k=search_config.top_k,
-                level=search_config.level,
-            )
-            retrieved = [
-                RetrievedContext(
-                    community_id=str(c.get("id", "")),
-                    level=int(c.get("level", 0)),
-                    summary=str(c.get("summary", "")),
-                    score=float(c.get("score", 0.0)),
+            # Extract retrieved contexts from the search diagnostics
+            reports_used = search_result.metadata.get("reports_used", 0)
+            if reports_used > 0:
+                # Re-read reports for context capture
+                raw_communities = graph_store.execute_query(
+                    """
+                    MATCH (c:Community {graph_name: $graph_name, level: $level})
+                    WHERE coalesce(c.report_status, 'success') <> 'failed'
+                      AND coalesce(c.report_text, c.summary, '') <> ''
+                    RETURN c.id AS id,
+                           c.level AS level,
+                           coalesce(c.report_text, c.summary) AS summary
+                    ORDER BY c.id
+                    """,
+                    {"graph_name": retriever.graph_name, "level": search_config.level},
                 )
-                for c in raw_communities
-            ]
+                retrieved = [
+                    RetrievedContext(
+                        community_id=str(c.get("id", "")),
+                        level=int(c.get("level", 0)),
+                        summary=str(c.get("summary", "")),
+                        score=0.0,
+                    )
+                    for c in raw_communities[:search_config.top_k]
+                ]
         except Exception as exc:  # pragma: no cover - defensive
             errors.append(str(exc))
         elapsed = time.perf_counter() - start
