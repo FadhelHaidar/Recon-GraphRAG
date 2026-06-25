@@ -50,7 +50,7 @@ Implement a store class that satisfies `GraphStore`.
   - `upsert_vectors`
   - `vector_search`
   - `keyword_search`
-  - `fetch_entity_context`
+- `fetch_entity_context`
   - `search_communities`
   - `detect_communities`
   - `get_unembedded_communities`
@@ -60,12 +60,15 @@ Implement a store class that satisfies `GraphStore`.
   - `get_community_summaries_by_keys`
   - `get_community_entities_by_keys`
   - `backfill_descriptions`
+  - `resolve_chunk_citations`
+  - `get_claims_for_entities`
 
 Shared `BaseGraphStore` methods should cover:
 
 - Count helpers and `validate_graph_build`
 - Community stats and report persistence
 - Safe read helpers such as `get_communities`, `get_claims_for_entities`, and `resolve_chunk_citations`
+- Entity-resolution preflight helpers
 
 ## Writer Checklist
 
@@ -90,9 +93,9 @@ Inherit `BaseEntityResolver` for grouping, fuzzy matching, hybrid review, LLM re
 
 The backend resolver should implement:
 
+- `_preflight(graph_name, resolve_property)` — backend-specific checks such as procedure availability. Optional; the base resolver runs it before loading entities when defined.
 - `_load_entities(graph_name, resolve_property)`
 - `_merge_groups(groups, resolve_property)`
-- Backend-specific preflight checks if needed, such as procedure availability.
 
 Preserve backend-specific merge semantics:
 
@@ -142,12 +145,17 @@ The implementation must preserve:
 
 Add focused tests before integration tests:
 
-- `tests/graphdb/<backend>/test_<backend>_store.py`
-- `tests/graphdb/<backend>/test_<backend>_index_manager.py`
-- `tests/graphdb/<backend>/test_<backend>_entity_resolution.py`
-- `tests/pipelines/<backend>/test_<backend>_writer.py`
-- Backend-specific community detection tests if detection uses custom logic.
-- Retrieval query tests if row shape or ordering differs.
+- Shared base contract tests (already exercise backend-neutral behavior):
+  - `tests/graphdb/test_store_base.py`
+  - `tests/graphdb/test_entity_resolution_contract.py`
+  - `tests/pipelines/test_writer_characterization.py`
+- Backend-specific tests:
+  - `tests/graphdb/<backend>/test_<backend>_store.py`
+  - `tests/graphdb/<backend>/test_<backend>_index_manager.py`
+  - `tests/graphdb/<backend>/test_<backend>_entity_resolution.py`
+  - `tests/pipelines/<backend>/test_<backend>_writer.py`
+  - Backend-specific community detection tests if detection uses custom logic.
+  - Retrieval query tests if row shape or ordering differs.
 
 Add integration tests behind explicit run flags:
 
