@@ -44,11 +44,13 @@ class GraphStore(Protocol):
     # ------------------------------------------------------------------
     # Indexes
     # ------------------------------------------------------------------
-    def create_indexes(self, config: IndexConfig, embedding_dim: int) -> None:
+    def create_indexes(
+        self, config: Optional[IndexConfig] = None, embedding_dim: int = 1536
+    ) -> None:
         """Create all required vector, fulltext, and uniqueness indexes."""
         ...
 
-    def drop_indexes(self, config: IndexConfig) -> None:
+    def drop_indexes(self, config: Optional[IndexConfig] = None) -> None:
         """Drop existing indexes so they can be recreated."""
         ...
 
@@ -149,17 +151,6 @@ class GraphStore(Protocol):
     # ------------------------------------------------------------------
     # Communities
     # ------------------------------------------------------------------
-    def search_communities(
-        self,
-        index_name: str,
-        query_vector: list[float],
-        graph_name: str,
-        top_k: int,
-        level: Optional[int] = None,
-    ) -> list[dict]:
-        """Vector search on community summary embeddings."""
-        ...
-
     def detect_communities(
         self,
         graph_name: str,
@@ -218,12 +209,6 @@ class GraphStore(Protocol):
         error: str,
     ) -> None:
         """Record a failed community report generation attempt."""
-        ...
-
-    def get_unembedded_communities(
-        self, graph_name: str, level: int
-    ) -> list[dict]:
-        """Get communities with summaries but no embeddings."""
         ...
 
     def get_unembedded_entities(self, limit: int = 500) -> list[dict]:
