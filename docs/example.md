@@ -148,6 +148,8 @@ To create your own example:
 5. Adjust `prompts.py` to match your domain's language.
 6. Update the extract, ingest, community, and search scripts to call your new modules.
 
+---
+
 ## Next steps
 
 - Read the [Quick Start](quickstart.md) for a minimal version of the same flow.

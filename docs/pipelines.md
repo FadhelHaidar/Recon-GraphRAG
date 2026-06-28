@@ -14,6 +14,8 @@ Recon-GraphRAG splits indexing into two pipelines: one that builds the entity gr
 
 After both pipelines run, the graph is ready for `GraphRAG.search()` in `local`, `global`, or `drift` mode.
 
+---
+
 ## GraphBuilderPipeline
 
 `GraphBuilderPipeline` turns raw text into a resolved and embedded entity graph.
@@ -294,6 +296,8 @@ layer of structured evidence when enabled.
 - Pass `metadata` to link extracted chunks and entities back to any source
   shape: documents, pages, database rows, tickets, API objects, or list items.
 
+---
+
 ## CommunityPipeline
 
 `CommunityPipeline` detects hierarchical communities using the backend store's Leiden implementation and summarizes each community with an LLM.
@@ -382,6 +386,8 @@ for level, community_id in enumerate(path):
 ```
 
 This is the opposite of some Microsoft GraphRAG descriptions, where level 0 is often interpreted as the root or coarsest level. For search examples, see [Search](search.md).
+
+---
 
 ## Next steps
 

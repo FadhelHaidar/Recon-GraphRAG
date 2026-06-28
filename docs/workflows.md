@@ -12,6 +12,8 @@ Reach for these primitives when you want to:
 - Add side effects (logging, caching, validation) by wrapping `GraphWriter`.
 - Swap in your own LLM or embedder that does not fit the factory functions.
 
+---
+
 ## Core data types
 
 All database-neutral types live in [`recon_graphrag.extraction.types`](../recon_graphrag/extraction/types.py).
@@ -180,6 +182,8 @@ GraphDocument(
 )
 ```
 
+---
+
 ## Extraction primitives
 
 The full extraction path is split into three objects so you can stop at any point.
@@ -252,6 +256,8 @@ page_chunks = window_builder.build_windows(
     metadata={"source": "pages"},
 )
 ```
+
+---
 
 ## GraphStore / GraphWriter
 
@@ -440,6 +446,8 @@ class InMemoryGraphStore(GraphStore):
 
 See [`recon_graphrag/graphdb/base.py`](../recon_graphrag/graphdb/base.py) for the complete protocol.
 
+---
+
 ## Run entity resolution independently
 
 `GraphBuilderPipeline` calls entity resolution for you after writing extracted
@@ -607,6 +615,8 @@ Backend notes:
 - `graph_name` matters. Resolution only compares entities inside the requested
   graph.
 
+---
+
 ## Retrieval primitives
 
 Instead of `GraphRAG.search()`, you can instantiate retrievers directly. This is useful when you need fine-grained control over index names, prompts, or result formatting.
@@ -707,6 +717,8 @@ retriever = HybridEntityRetriever(
 result = await retriever.search("Who directed Inception?", top_k=10)
 ```
 
+---
+
 ## Community primitives
 
 [`recon_graphrag.communities.pipeline.CommunityPipeline`](../recon_graphrag/communities/pipeline.py) is a convenience wrapper around two steps:
@@ -722,6 +734,8 @@ from recon_graphrag.communities.summarization import CommunitySummarizer
 summarizer = CommunitySummarizer(store, llm, graph_name="entity-graph")
 summaries = await summarizer.summarize_all(level=0)
 ```
+
+---
 
 ## LLM / embedder base classes
 
@@ -757,6 +771,8 @@ class MyEmbedder(BaseEmbedder):
     async def async_embed_query(self, text: str, **kwargs) -> list[float]:
         return self.embed_query(text)
 ```
+
+---
 
 ## Manual extraction flow example
 
@@ -805,6 +821,8 @@ async def extract_to_json(text: str, schema: GraphSchema, llm, out_path: Path):
     save_graph_document_json(graph_doc, out_path)
     return graph_doc
 ```
+
+---
 
 ## Next steps
 
