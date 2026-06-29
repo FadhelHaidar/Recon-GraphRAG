@@ -53,6 +53,7 @@ class LocalSearchRetriever(BaseRetriever):
         fulltext_index_name: str = "entity-names",
         graph_name: str = "entity-graph",
         use_mixed_context: bool = False,
+        top_k_relationships: int = 10,
     ):
         self.graph_store = graph_store
         self.llm = llm
@@ -63,6 +64,7 @@ class LocalSearchRetriever(BaseRetriever):
         self.fulltext_index_name = fulltext_index_name
         self.graph_name = graph_name
         self.use_mixed_context = use_mixed_context
+        self.top_k_relationships = top_k_relationships
         self._retriever = self._build_retriever()
         self._mixed_context_builder: MixedContextBuilder | None = None
 
@@ -233,6 +235,7 @@ class LocalSearchRetriever(BaseRetriever):
             retriever_result,
             citations=citations,
             citation_metadata_keys=citation_metadata_keys,
+            top_k_relationships=self.top_k_relationships,
         )
 
     def _resolve_citations(self, retriever_result):
@@ -296,6 +299,7 @@ def _format_entity_context(
     citations: list[Citation] | None = None,
     citation_metadata_keys: list[str] | None = None,
     drift: bool = False,
+    top_k_relationships: int | None = None,
 ) -> str:
     citation_lines = _format_citation_metadata(citations or [], citation_metadata_keys)
     heading_prefix = "  " if drift else ""
@@ -314,6 +318,8 @@ def _format_entity_context(
 
         section = f"Finding: {content.get('title', 'Unknown')}"
         relationships = content.get("relationships", [])
+        if top_k_relationships is not None:
+            relationships = relationships[:top_k_relationships]
         if relationships:
             section += block("Connections", relationships)
         sources = content.get("source_text", [])

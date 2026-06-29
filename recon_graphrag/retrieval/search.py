@@ -35,11 +35,13 @@ class GraphRAG:
         reduce_budget_tokens: int = 12000,
         use_mixed_context: bool = False,
         drift_config: DriftSearchConfig | None = None,
+        top_k_relationships: int = 10,
     ):
         self.local = LocalSearchRetriever(
             graph_store, llm, embedder,
             graph_name=graph_name,
             use_mixed_context=use_mixed_context,
+            top_k_relationships=top_k_relationships,
         )
         self.global_ = GlobalSearchRetriever(
             graph_store,
