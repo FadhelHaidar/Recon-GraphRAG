@@ -37,8 +37,9 @@ result = await graph_rag.search("Your question", mode="local")
 | `token_counter` | Optional token counter for global map/reduce batching. |
 | `map_budget_tokens` | Maximum report text packed into one map prompt. |
 | `reduce_budget_tokens` | Maximum partial-answer text packed into the final reduce prompt. |
-| `use_mixed_context` | When `True`, local search uses `MixedContextBuilder` to combine entity subgraph, community reports, and claims into a single token-budgeted context. Defaults to `False`. |
+| `use_mixed_context` | When `True`, local search uses `MixedContextBuilder` to combine entity subgraph, community reports, and claims into a single token-budgeted context. Defaults to `True`. |
 | `drift_config` | Optional `DriftSearchConfig` controlling iterative DRIFT search parameters. |
+| `top_k_relationships` | Maximum relationships shown per entity in local context. Defaults to `10`. |
 
 ---
 
@@ -288,6 +289,10 @@ config = DriftSearchConfig(
 | `action_concurrency` | `3` | Maximum number of actions evaluated concurrently during traversal. |
 | `community_level` | `"coarsest"` | Default community level for primer report search. Overridden by the `community_level` search parameter if provided. |
 | `reduce_budget_tokens` | `12000` | Token budget for packing scored action answers into the final reduction prompt. |
+| `use_hyde` | `True` | Enable HyDE (Hypothetical Document Embedding) for primer. Generates a hypothetical answer from a random report template, re-embeds, and re-searches for better report retrieval. |
+| `primer_folds` | `1` | Number of folds to split primer reports into for parallel LLM decomposition. When > 1, reports are split into N folds, processed in parallel, and follow-ups are merged. |
+| `action_use_mixed_context` | `True` | When `True`, each DRIFT action builds mixed context (entities + community reports + claims) instead of entity-only context. |
+| `action_mixed_context_tokens` | `12000` | Token budget for mixed context in each DRIFT action. Only used when `action_use_mixed_context=True`. |
 
 DRIFT returns citations for retrieved local source chunks and for references in
 the selected primer reports.
@@ -1280,6 +1285,39 @@ count = await CommunityReportEmbedder(store, embedder, "entity-graph").embed_rep
 - **Global** when you want all-report processing at a selected community level
   for broad themes, risks, or corpus-level questions.
 - **DRIFT** when the question needs specific evidence plus broader context.
+
+---
+
+## Microsoft GraphRAG Alignment
+
+Recon-GraphRAG aligns with Microsoft GraphRAG's search implementation. The table
+below shows alignment status for each feature.
+
+| Feature | Status | Default | Notes |
+| --- | --- | --- | --- |
+| Local entity subgraph traversal | Aligned | — | Same 1-hop neighbor + source chunk retrieval. |
+| Hybrid vector + keyword entity search | Aligned | — | Same normalization and ranking logic. |
+| Mixed context (entities + reports + claims) | Aligned | `use_mixed_context=True` | Microsoft always includes community reports; recon defaults to `True`. |
+| Relationship cap per entity | Aligned | `top_k_relationships=10` | Caps displayed relationships per entity in context. |
+| Global map-reduce over community reports | Aligned | — | Same shuffle, batch, map, filter, reduce pipeline. |
+| General knowledge fallback | Opt-in | `allow_general_knowledge=False` | When all map scores are 0, optionally appends general knowledge instruction to reduce prompt. Off by default to avoid hallucination. |
+| DRIFT primer with community reports | Aligned | — | Same vector search over community report embeddings. |
+| HyDE primer query expansion | Aligned | `use_hyde=True` | Generates hypothetical answer from random report template, re-embeds for better retrieval. |
+| Primer folds (parallel decomposition) | Opt-in | `primer_folds=1` | Splits reports into N folds for parallel primer LLM calls. Default 1 preserves single-call behavior. |
+| DRIFT action mixed context | Aligned | `action_use_mixed_context=True` | Each action builds full mixed context, not just entity-only context. |
+| DRIFT iterative traversal | Aligned | — | Same breadth-first expansion with depth/LLM-call limits. |
+| Community level resolution | Aligned | — | Same `"coarsest"` / `"finest"` / numeric level selection. |
+| Citation resolution from report references | Aligned | — | Same `report_json` → `findings[*].references` → chunk citation pipeline. |
+| `synthesize_response=False` agent mode | Aligned | — | All modes support skipping LLM synthesis. |
+
+Key differences from Microsoft's implementation:
+
+- **Default off for `allow_general_knowledge`**: Microsoft allows it as an option; recon
+  keeps it off by default to avoid hallucination risk.
+- **`primer_folds` defaults to 1**: Microsoft uses parallel folds; recon defaults to
+  single-call primer for simplicity. Set `primer_folds > 1` to match.
+- **Token budgeting**: Uses `ApproximateTokenCounter` by default (`ceil(len/4)`); Microsoft
+  uses tiktoken. Install tiktoken and use `TiktokenTokenCounter` for exact parity.
 
 ---
 
