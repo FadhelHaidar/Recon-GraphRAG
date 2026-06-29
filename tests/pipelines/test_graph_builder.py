@@ -523,6 +523,7 @@ async def test_extract_chunks_concurrently(
         schema=movie_schema,
         graph_writer=fake_writer,
         extraction_concurrency=3,
+        max_gleanings=0,
         perform_entity_resolution=False,
         embed_entities=False,
     )
@@ -614,6 +615,7 @@ async def test_partial_extraction_failure_continues(
         schema=movie_schema,
         graph_writer=fake_writer,
         extraction_concurrency=3,
+        max_gleanings=0,
         perform_entity_resolution=False,
         embed_entities=False,
     )
