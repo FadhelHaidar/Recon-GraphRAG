@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from recon_graphrag.retrieval.global_search import (
+from recon_graphrag.retrieval.search_global import (
     GlobalSearchRetriever,
     MapBatch,
     PartialAnswer,

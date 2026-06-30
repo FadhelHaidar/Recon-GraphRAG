@@ -12,14 +12,13 @@ This creates:
 
 | Index name | Type | Indexed data |
 | --------- | --------- | --------- |
-| `chunk-embeddings` | Vector | `Chunk.embedding` |
 | `entity-embeddings` | Vector | `__Entity__.embedding` |
 | `entity-names` | Fulltext | `__Entity__.name` |
 | `community-report-embeddings` | Vector | `Community.report_embedding` |
 
 These indexes power:
 
-- Semantic search over chunks and entities.
+- Semantic search over entities.
 - Keyword search over entity names.
 - Semantic primer search for DRIFT mode (community report vectors).
 
@@ -96,12 +95,10 @@ store.create_indexes(
 
 | Field | Default | Description |
 | --- | --- | --- |
-| `chunk_vector_index` | `"chunk-embeddings"` | Vector index name for chunk embeddings. |
 | `entity_vector_index` | `"entity-embeddings"` | Vector index name for entity embeddings. |
 | `entity_fulltext_index` | `"entity-names"` | Fulltext index name for entity names. |
 | `community_vector_index` | `"community-report-embeddings"` | Vector index name for community report embeddings. |
 | `entity_label` | `"__Entity__"` | Node label for entities. |
-| `chunk_label` | `"Chunk"` | Node label for chunks. |
 | `community_label` | `"Community"` | Node label for communities. |
 | `community_report_embedding_property` | `"report_embedding"` | Property name storing community report vectors. |
 

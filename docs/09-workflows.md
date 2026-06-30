@@ -668,7 +668,7 @@ result = await retriever.search("Who directed Inception?", top_k=10)
 Community-report-based map-reduce search.
 
 ```python
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
+from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
 
 retriever = GlobalSearchRetriever(
     graph_store=store,

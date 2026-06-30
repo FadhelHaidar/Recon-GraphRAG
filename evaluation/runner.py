@@ -24,7 +24,7 @@ from pathlib import Path
 from recon_graphrag._version import __version__, get_git_sha
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse, LLMUsage
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
+from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
 
 from .schemas import (
     PerQuestionResult,

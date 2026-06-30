@@ -55,7 +55,6 @@ store.create_indexes(IndexConfig(), embedding_dim=1536)
 
 The indexes created are:
 
-- `chunk-embeddings` — vector index on `Chunk.embedding`
 - `entity-embeddings` — vector index on `__Entity__.embedding`
 - `entity-names` — fulltext index on `__Entity__.name`
 - `community-report-embeddings` — vector index on `Community.report_embedding`

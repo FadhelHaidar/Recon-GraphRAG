@@ -985,7 +985,7 @@ graph_rag.global_.reduce_prompt = (
 ```
 
 Global search uses scored map/reduce prompts defined in
-`recon_graphrag.retrieval.global_search`.
+`recon_graphrag.retrieval.search_global`.
 
 ### DRIFT Prompt
 
@@ -1026,7 +1026,7 @@ Before search can work, the graph should contain:
 | Node | What it represents | Key properties |
 | --- | --- | --- |
 | `__Entity__` | Extracted people, places, concepts, etc. | UUID `id`, `canonical_key`, `human_readable_id`, `name`, `title`, `description`, `embedding`, `graph_name` |
-| `Chunk` | A text chunk from the original source unit | `id`, `text`, `embedding`, arbitrary source metadata such as `record_id`, `page`, `table`, `ticket_id` |
+| `Chunk` | A text chunk from the original source unit | `id`, `text`, arbitrary source metadata such as `record_id`, `page`, `table`, `ticket_id` |
 | `Document` | The source unit or container | metadata such as `title`, `source`, `filename`, `collection`, `external_id` |
 | `Community` | A cluster of related entities | `report_text`, `report_json`, `report_status`, `level` |
 | `Claim` | A claim/covariate extracted from text | `description`, `claim_type`, `status`, `graph_name` |
@@ -1233,7 +1233,6 @@ Search depends on indexes created by `store.create_indexes()`:
 | Index | Type | Indexed property | Used by |
 | --- | --- | --- | --- |
 | `entity-embeddings` | Vector | `__Entity__.embedding` | Local, DRIFT |
-| `chunk-embeddings` | Vector | `Chunk.embedding` | Not used directly by search modes |
 | `entity-names` | Full-text / text | `__Entity__.name` | Local, DRIFT |
 | `community-report-embeddings` | Vector | `Community.report_embedding` | DRIFT (primer phase) |
 

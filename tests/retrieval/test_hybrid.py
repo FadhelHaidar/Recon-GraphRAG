@@ -5,7 +5,7 @@ import pytest
 from recon_graphrag.llm import LLMResponse
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.retrieval.hybrid import HybridEntityRetriever, merge_hybrid_scores
-from recon_graphrag.retrieval.local import LocalSearchRetriever
+from recon_graphrag.retrieval.search_local import LocalSearchRetriever
 
 
 class FakeGraphStore:

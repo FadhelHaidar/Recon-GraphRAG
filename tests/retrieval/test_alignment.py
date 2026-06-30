@@ -11,11 +11,11 @@ import json
 import pytest
 
 from recon_graphrag.llm import LLMResponse
-from recon_graphrag.retrieval.drift import DriftSearchRetriever
+from recon_graphrag.retrieval.search_drift import DriftSearchRetriever
 from recon_graphrag.retrieval.drift_types import DriftSearchConfig
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
+from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
 from recon_graphrag.retrieval.hybrid import RetrievalItem, RetrievalResult
-from recon_graphrag.retrieval.local import (
+from recon_graphrag.retrieval.search_local import (
     LocalSearchRetriever,
     _format_entity_context,
 )

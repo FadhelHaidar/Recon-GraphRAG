@@ -33,7 +33,7 @@ class CommunityPipeline:
         relationship_weight_property: str = "weight",
         random_seed: Optional[int] = 42,
         report_rubric: ReportRubric | None = None,
-        summarize_concurrency: int = 1,
+        summarize_concurrency: int = 10,
         skip_existing: bool = False,
         max_context_tokens: int = 8000,
         token_counter: TokenCounter | None = None,

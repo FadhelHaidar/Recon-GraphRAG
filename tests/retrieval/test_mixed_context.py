@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from recon_graphrag.llm import LLMResponse
-from recon_graphrag.retrieval.local import LocalSearchRetriever
+from recon_graphrag.retrieval.search_local import LocalSearchRetriever
 from recon_graphrag.retrieval.mixed_context import MixedContextBuilder
 
 

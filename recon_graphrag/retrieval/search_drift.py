@@ -43,7 +43,7 @@ from recon_graphrag.retrieval.drift_types import (
     DriftSearchConfig,
 )
 from recon_graphrag.retrieval.hybrid import HybridEntityRetriever, HybridRanker
-from recon_graphrag.retrieval.local import _source_chunk_ids_from_result
+from recon_graphrag.retrieval.search_local import _source_chunk_ids_from_result
 from recon_graphrag.retrieval.mixed_context import MixedContextBuilder
 from recon_graphrag.utils.tokens import (
     ApproximateTokenCounter,
@@ -699,7 +699,7 @@ class DriftSearchRetriever:
                 except Exception:
                     pass
 
-            from recon_graphrag.retrieval.local import _format_entity_context
+            from recon_graphrag.retrieval.search_local import _format_entity_context
 
             local_context = _format_entity_context(
                 retriever_result,
@@ -938,7 +938,7 @@ class DriftSearchRetriever:
             alpha=alpha,
         )
 
-        from recon_graphrag.retrieval.local import _format_entity_context
+        from recon_graphrag.retrieval.search_local import _format_entity_context
 
         entity_context = _format_entity_context(retriever_result, drift=True)
         chunk_ids = _source_chunk_ids_from_result(retriever_result)
@@ -1171,7 +1171,7 @@ class DriftSearchRetriever:
             json_refs: list[dict] = []
             if report_json:
                 try:
-                    from recon_graphrag.retrieval.global_search import (
+                    from recon_graphrag.retrieval.search_global import (
                         GlobalSearchRetriever,
                     )
 
@@ -1189,7 +1189,7 @@ class DriftSearchRetriever:
                 report_text = report.get("report_text", "")
                 if report_text:
                     try:
-                        from recon_graphrag.retrieval.global_search import (
+                        from recon_graphrag.retrieval.search_global import (
                             GlobalSearchRetriever,
                         )
 

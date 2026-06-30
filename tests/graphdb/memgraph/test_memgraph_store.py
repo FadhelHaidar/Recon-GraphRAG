@@ -458,7 +458,6 @@ def test_create_indexes_runs_uid_constraint(store, fake_driver):
     store.create_indexes(embedding_dim=1536)
 
     query_text = "\n".join(fake_driver.session_obj.queries)
-    assert "CREATE VECTOR INDEX `chunk-embeddings`" in query_text
     assert "CREATE VECTOR INDEX `entity-embeddings`" in query_text
     assert "CREATE TEXT INDEX `entity-names`" in query_text
     assert "CREATE CONSTRAINT" in query_text

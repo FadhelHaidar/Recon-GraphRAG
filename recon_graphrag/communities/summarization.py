@@ -68,7 +68,7 @@ class CommunitySummarizer:
         llm: BaseLLM,
         graph_name: str = "entity-graph",
         report_rubric: ReportRubric | None = None,
-        concurrency: int = 1,
+        concurrency: int = 5,
         max_context_tokens: int | None = None,
         token_counter: TokenCounter | None = None,
     ):

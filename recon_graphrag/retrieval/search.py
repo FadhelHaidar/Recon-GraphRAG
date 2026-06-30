@@ -6,10 +6,10 @@ from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.types import SearchResult
-from recon_graphrag.retrieval.drift import DriftSearchRetriever
+from recon_graphrag.retrieval.search_drift import DriftSearchRetriever
 from recon_graphrag.retrieval.drift_types import DriftSearchConfig
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
-from recon_graphrag.retrieval.local import LocalSearchRetriever
+from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
+from recon_graphrag.retrieval.search_local import LocalSearchRetriever
 from recon_graphrag.utils.tokens import TokenCounter
 
 

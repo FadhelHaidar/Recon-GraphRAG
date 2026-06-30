@@ -4,7 +4,7 @@ import pytest
 
 from recon_graphrag.llm import LLMResponse
 from recon_graphrag.retrieval.community_levels import resolve_community_level
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
+from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
 
 
 class FakeGraphStore:
@@ -135,7 +135,7 @@ async def test_global_search_accepts_coarsest_alias():
 @pytest.mark.asyncio
 async def test_drift_search_accepts_coarsest_alias():
     """DriftSearchRetriever passes community_level to vector_search_community_reports."""
-    from recon_graphrag.retrieval.drift import DriftSearchRetriever
+    from recon_graphrag.retrieval.search_drift import DriftSearchRetriever
 
     store = FakeGraphStore()
     store.vector_search_community_reports_calls = []
