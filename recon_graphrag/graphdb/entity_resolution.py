@@ -122,7 +122,7 @@ class BaseEntityResolver(ABC):
             groups, review_groups = self._build_normalized_groups(entities)
             signals = {"normalized": "used"}
         elif strategy == "fuzzy":
-            groups, review_groups = self._build_fuzzy_groups(
+            groups, review_groups, _ = self._build_fuzzy_groups(
                 entities,
                 merge_threshold=merge_threshold,
                 review_threshold=review_threshold,
@@ -263,13 +263,14 @@ class BaseEntityResolver(ABC):
         merge_threshold: float,
         review_threshold: float,
         max_candidates_per_entity: int,
-    ) -> tuple[list[list[_EntityRecord]], list[dict]]:
+    ) -> tuple[list[list[_EntityRecord]], list[dict], list[tuple[_EntityRecord, _EntityRecord, float]]]:
         normalized_groups, _ = self._build_normalized_groups(entities)
         merged_ids = {e.node_id for g in normalized_groups for e in g}
         singletons = [e for e in entities if e.node_id not in merged_ids]
 
         fuzzy_groups: list[list[_EntityRecord]] = []
         review_groups: list[dict] = []
+        dropped_pairs: list[tuple[_EntityRecord, _EntityRecord, float]] = []
         used = set()
         reviewed_pairs: set[frozenset] = set()
 
@@ -307,8 +308,11 @@ class BaseEntityResolver(ABC):
                     )
                     reviewed_pairs.add(pair_key)
                     break
+                else:
+                    dropped_pairs.append((e1, e2, score))
+                    reviewed_pairs.add(pair_key)
 
-        return normalized_groups + fuzzy_groups, review_groups
+        return normalized_groups + fuzzy_groups, review_groups, dropped_pairs
 
     def _blocked_candidates(
         self,
@@ -371,7 +375,7 @@ class BaseEntityResolver(ABC):
         conflict_properties: Optional[dict[str, list[str]] | list[str]],
         context_mode: str,
     ) -> tuple[list[list[_EntityRecord]], list[dict], list[dict]]:
-        groups, review_groups = self._build_fuzzy_groups(
+        groups, review_groups, dropped_pairs = self._build_fuzzy_groups(
             entities,
             merge_threshold=merge_threshold,
             review_threshold=review_threshold,
@@ -402,6 +406,13 @@ class BaseEntityResolver(ABC):
             active_review_groups = await self._score_with_embeddings(
                 active_review_groups, embedder, allow_ai_auto_merge, merge_threshold
             )
+
+        # When an LLM is available, rescue candidates that fuzzy scoring
+        # dropped.  The blocking heuristic already constrains the pool, so
+        # these are plausible matches worth LLM judgement.
+        if llm and dropped_pairs:
+            rescued = self._rescue_dropped_pairs(dropped_pairs, merged_ids)
+            active_review_groups.extend(rescued)
 
         if llm and active_review_groups:
             active_review_groups = await self._llm_review(
@@ -621,6 +632,37 @@ class BaseEntityResolver(ABC):
                 rg["scores"]["embedding"] = None
                 rg["embedding_error"] = str(exc)
         return review_groups
+
+    def _rescue_dropped_pairs(
+        self,
+        dropped_pairs: list[tuple[_EntityRecord, _EntityRecord, float]],
+        merged_ids: set,
+    ) -> list[dict]:
+        """Promote fuzzy-dropped pairs to LLM review.
+
+        These pairs passed the blocking heuristic (same domain, similar
+        length, compatible first token) but scored below the fuzzy review
+        threshold.  They are plausible matches worth LLM judgement.
+        """
+        rescued: list[dict] = []
+        for e1, e2, fuzzy_score in dropped_pairs:
+            if e1.node_id in merged_ids or e2.node_id in merged_ids:
+                continue
+            rescued.append(
+                {
+                    "domain_label": e1.domain_label,
+                    "names": [e1.resolve_value, e2.resolve_value],
+                    "node_ids": [e1.node_id, e2.node_id],
+                    "reason": "llm_rescue",
+                    "scores": {
+                        "fuzzy": round(fuzzy_score, 2),
+                        "embedding": None,
+                        "llm": None,
+                    },
+                    "decision": "review",
+                }
+            )
+        return rescued
 
     @staticmethod
     def _cosine_similarity(a: list[float], b: list[float]) -> float:

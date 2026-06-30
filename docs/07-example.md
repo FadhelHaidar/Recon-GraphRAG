@@ -32,7 +32,7 @@ All build and search scripts accept `--llm-provider` and `--embedder-provider` f
 
 ```bash
 python extract.py --llm-provider openrouter
-python ingest.py --backend all --embedder-provider openai
+python ingest.py --backend all --embedder-provider openai --llm-provider openai --entity-resolution-strategy hybrid
 python search.py --backend neo4j --llm-provider openai --embedder-provider sentence-transformer
 ```
 
@@ -73,7 +73,7 @@ python ingest.py --backend neo4j --entity-resolution-strategy hybrid --allow-ai-
    ```bash
    cd examples
    python extract.py --llm-provider openrouter
-   python ingest.py --backend neo4j --embedder-provider openrouter
+   python ingest.py --backend neo4j --embedder-provider openrouter --llm-provider openrouter --entity-resolution-strategy hybrid
    ```
 
 4. Build communities:
@@ -103,7 +103,7 @@ python ingest.py --backend neo4j --entity-resolution-strategy hybrid --allow-ai-
    ```bash
    cd examples
    python extract.py --llm-provider openrouter
-   python ingest.py --backend memgraph --embedder-provider openrouter
+   python ingest.py --backend memgraph --embedder-provider openrouter --llm-provider openrouter --entity-resolution-strategy hybrid
    ```
 
 4. Build communities:
@@ -124,7 +124,7 @@ To compare outputs fairly, ingest all configured graph backends from the same ar
 
 ```bash
 python extract.py --llm-provider openrouter
-python ingest.py --backend all --embedder-provider openrouter
+python ingest.py --backend all --embedder-provider openrouter --llm-provider openrouter --entity-resolution-strategy hybrid
 python communities.py --backend all --llm-provider openrouter --embedder-provider openrouter
 python compare_backends.py --limit 5
 ```

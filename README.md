@@ -160,7 +160,7 @@ A complete movie industry example is available in [examples/](examples/):
 ```bash
 cd examples
 python extract.py
-python ingest.py --backend all
+python ingest.py --backend all --entity-resolution-strategy hybrid --llm-provider openrouter
 python communities.py --backend all
 python search.py --backend neo4j
 python search.py --backend memgraph

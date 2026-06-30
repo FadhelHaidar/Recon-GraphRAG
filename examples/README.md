@@ -9,7 +9,7 @@ An end-to-end movie-domain GraphRAG workflow for Neo4j and Memgraph.
 python extract.py --llm-provider openrouter
 
 # 2. Ingest into one or all graph backends
-python ingest.py --backend all --embedder-provider openrouter
+python ingest.py --backend all --embedder-provider openrouter --llm-provider openrouter --entity-resolution-strategy hybrid
 
 # 3. Build communities
 python communities.py --backend all --llm-provider openrouter
