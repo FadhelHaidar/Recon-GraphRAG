@@ -1,19 +1,19 @@
-"""Abstract base class for retrievers."""
+"""Retriever protocol."""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from typing import Protocol, runtime_checkable
 
 from recon_graphrag.models.types import SearchResult
 
 
-class BaseRetriever(ABC):
-    """Abstract retriever interface.
+@runtime_checkable
+class BaseRetriever(Protocol):
+    """Protocol for retriever implementations.
 
-    All search modes (local, global, drift) implement this interface.
+    All search modes (local, global, drift) implement this protocol.
     """
 
-    @abstractmethod
     async def search(self, query: str, **kwargs) -> SearchResult:
         """Run a search and return structured results."""
         ...

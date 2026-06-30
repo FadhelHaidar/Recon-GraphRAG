@@ -28,7 +28,7 @@ from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.types import SearchResult
-from recon_graphrag.retrieval.base import BaseRetriever
+
 from recon_graphrag.retrieval.citations import (
     resolve_chunk_citations,
     resolve_reference_citations,
@@ -194,7 +194,7 @@ Answer:"""
 # ---------------------------------------------------------------------------
 
 
-class DriftSearchRetriever(BaseRetriever):
+class DriftSearchRetriever:
     """DRIFT search: iterative traversal with community report priming."""
 
     def __init__(

@@ -19,7 +19,7 @@ from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.models.types import SearchResult
-from recon_graphrag.retrieval.base import BaseRetriever
+
 from recon_graphrag.retrieval.citations import resolve_reference_citations
 from recon_graphrag.retrieval.community_levels import (
     CommunityLevelSelector,
@@ -166,7 +166,7 @@ def _diag_to_dict(diag: GlobalSearchDiagnostics) -> dict:
     }
 
 
-class GlobalSearchRetriever(BaseRetriever):
+class GlobalSearchRetriever:
     """Global search: read all reports at a level, scored map-reduce.
 
     Reads every community report at one hierarchy level, shuffles for

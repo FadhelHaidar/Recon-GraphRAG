@@ -18,7 +18,7 @@ from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.models.types import SearchResult
-from recon_graphrag.retrieval.base import BaseRetriever
+
 from recon_graphrag.retrieval.citations import resolve_chunk_citations
 from recon_graphrag.retrieval.community_levels import CommunityLevelSelector
 from recon_graphrag.retrieval.hybrid import HybridEntityRetriever, HybridRanker
@@ -39,7 +39,7 @@ Cite specific entities and findings when possible.
 Answer:"""
 
 
-class LocalSearchRetriever(BaseRetriever):
+class LocalSearchRetriever:
     """Local search: find entities matching query, traverse subgraph, generate answer."""
 
     def __init__(
