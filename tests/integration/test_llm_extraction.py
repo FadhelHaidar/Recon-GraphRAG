@@ -54,7 +54,16 @@ class FakeGraphStore:
     def backfill_descriptions(self):
         pass
 
-    async def resolve_entities(self, **kwargs):
+    async def resolve_entities_exact(self, **kwargs):
+        return {"skipped": True, "reason": "disabled in test"}
+
+    async def resolve_entities_normalized(self, **kwargs):
+        return {"skipped": True, "reason": "disabled in test"}
+
+    async def resolve_entities_fuzzy(self, **kwargs):
+        return {"skipped": True, "reason": "disabled in test"}
+
+    async def resolve_entities_hybrid(self, **kwargs):
         return {"skipped": True, "reason": "disabled in test"}
 
     def get_unembedded_entities(self, limit=500):

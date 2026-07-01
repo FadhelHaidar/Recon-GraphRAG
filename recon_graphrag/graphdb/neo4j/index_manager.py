@@ -87,10 +87,54 @@ class IndexManager:
         except Exception as e:
             print(f"  Warning: community uniqueness constraint failed: {e}")
 
-    async def resolve_entities(
+    async def resolve_entities_exact(
         self,
         graph_name: str = "entity-graph",
-        strategy: str = "normalized",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        resolver = _Neo4jEntityResolver(self.graph_store)
+        return await resolver.resolve_exact(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+        )
+
+    async def resolve_entities_normalized(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        resolver = _Neo4jEntityResolver(self.graph_store)
+        return await resolver.resolve_normalized(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+        )
+
+    async def resolve_entities_fuzzy(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+    ) -> dict:
+        resolver = _Neo4jEntityResolver(self.graph_store)
+        return await resolver.resolve_fuzzy(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+        )
+
+    async def resolve_entities_hybrid(
+        self,
+        graph_name: str = "entity-graph",
         resolve_property: str = "name",
         dry_run: bool = False,
         merge_threshold: float = 95.0,
@@ -105,15 +149,9 @@ class IndexManager:
         conflict_properties: Optional[dict[str, list[str]] | list[str]] = None,
         context_mode: str = "safe_defaults",
     ) -> dict:
-        """Run entity resolution to merge duplicate __Entity__ nodes.
-
-        If APOC is unavailable, resolution is skipped and graph building can
-        continue.
-        """
         resolver = _Neo4jEntityResolver(self.graph_store)
-        return await resolver.resolve(
+        return await resolver.resolve_hybrid(
             graph_name=graph_name,
-            strategy=strategy,
             resolve_property=resolve_property,
             dry_run=dry_run,
             merge_threshold=merge_threshold,

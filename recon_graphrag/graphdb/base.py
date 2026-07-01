@@ -57,10 +57,39 @@ class GraphStore(Protocol):
     # ------------------------------------------------------------------
     # Entity resolution
     # ------------------------------------------------------------------
-    async def resolve_entities(
+    async def resolve_entities_exact(
         self,
         graph_name: str = "entity-graph",
-        strategy: str = "normalized",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        """Merge duplicate entity nodes using exact matching."""
+        ...
+
+    async def resolve_entities_normalized(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        """Merge duplicate entity nodes using normalized matching."""
+        ...
+
+    async def resolve_entities_fuzzy(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+    ) -> dict:
+        """Merge duplicate entity nodes using fuzzy string matching."""
+        ...
+
+    async def resolve_entities_hybrid(
+        self,
+        graph_name: str = "entity-graph",
         resolve_property: str = "name",
         dry_run: bool = False,
         merge_threshold: float = 95.0,
@@ -75,7 +104,7 @@ class GraphStore(Protocol):
         conflict_properties: Optional[dict[str, list[str]] | list[str]] = None,
         context_mode: str = "safe_defaults",
     ) -> dict:
-        """Merge duplicate entity nodes when possible."""
+        """Merge duplicate entity nodes using hybrid fuzzy + embedding + LLM matching."""
         ...
 
     # ------------------------------------------------------------------

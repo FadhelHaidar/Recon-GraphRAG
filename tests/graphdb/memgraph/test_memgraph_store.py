@@ -84,7 +84,7 @@ def test_execute_query_translates_result(store, fake_driver):
 
 
 @pytest.mark.asyncio
-async def test_resolve_entities_forwards_full_advanced_parameter_set(
+async def test_resolve_entities_hybrid_forwards_full_advanced_parameter_set(
     store, monkeypatch
 ):
     captured = {}
@@ -93,9 +93,9 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
         def __init__(self, graph_store):
             captured["graph_store"] = graph_store
 
-        async def resolve(self, **kwargs):
+        async def resolve_hybrid(self, **kwargs):
             captured["kwargs"] = kwargs
-            return {"strategy": kwargs["strategy"]}
+            return {"strategy": "hybrid"}
 
     monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
     embedder = object()
@@ -104,9 +104,8 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
     context_properties = {"Person": ["description", "birth_date"]}
     conflict_properties = {"Movie": ["year"]}
 
-    result = await store.resolve_entities(
+    result = await store.resolve_entities_hybrid(
         graph_name="movie-graph",
-        strategy="hybrid",
         resolve_property="title",
         dry_run=True,
         merge_threshold=91.0,
@@ -126,7 +125,6 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
     assert captured["graph_store"] is store
     assert captured["kwargs"] == {
         "graph_name": "movie-graph",
-        "strategy": "hybrid",
         "resolve_property": "title",
         "dry_run": True,
         "merge_threshold": 91.0,
@@ -140,6 +138,99 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
         "context_properties": context_properties,
         "conflict_properties": conflict_properties,
         "context_mode": "config_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_exact_forwards_basic_parameters(store, monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_exact(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "exact"}
+
+    monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
+
+    result = await store.resolve_entities_exact(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+    )
+
+    assert result == {"strategy": "exact"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_normalized_forwards_basic_parameters(store, monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_normalized(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "normalized"}
+
+    monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
+
+    result = await store.resolve_entities_normalized(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+    )
+
+    assert result == {"strategy": "normalized"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_fuzzy_forwards_fuzzy_parameters(store, monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_fuzzy(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "fuzzy"}
+
+    monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
+
+    result = await store.resolve_entities_fuzzy(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+        merge_threshold=91.0,
+        review_threshold=72.0,
+        max_candidates_per_entity=7,
+    )
+
+    assert result == {"strategy": "fuzzy"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+        "merge_threshold": 91.0,
+        "review_threshold": 72.0,
+        "max_candidates_per_entity": 7,
     }
 
 

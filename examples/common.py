@@ -201,13 +201,27 @@ async def finalize_graph_ingest(
     store.backfill_descriptions()
     if resolve_entities:
         print("Resolving duplicate entities after all selected graph ingests")
-        resolution = await store.resolve_entities(
-            graph_name=graph_document.document.graph_name,
-            strategy=entity_resolution_strategy,
-            embedder=embedder if entity_resolution_strategy == "hybrid" else None,
-            llm=llm if entity_resolution_strategy == "hybrid" else None,
-            allow_ai_auto_merge=allow_ai_auto_merge,
-        )
+        if entity_resolution_strategy == "exact":
+            resolution = await store.resolve_entities_exact(
+                graph_name=graph_document.document.graph_name,
+            )
+        elif entity_resolution_strategy == "normalized":
+            resolution = await store.resolve_entities_normalized(
+                graph_name=graph_document.document.graph_name,
+            )
+        elif entity_resolution_strategy == "fuzzy":
+            resolution = await store.resolve_entities_fuzzy(
+                graph_name=graph_document.document.graph_name,
+            )
+        elif entity_resolution_strategy == "hybrid":
+            resolution = await store.resolve_entities_hybrid(
+                graph_name=graph_document.document.graph_name,
+                embedder=embedder,
+                llm=llm,
+                allow_ai_auto_merge=allow_ai_auto_merge,
+            )
+        else:
+            raise ValueError(f"Unknown entity resolution strategy: {entity_resolution_strategy}")
         print(f"Entity resolution result: {resolution}")
     else:
         resolution = {"skipped": True, "reason": "disabled"}

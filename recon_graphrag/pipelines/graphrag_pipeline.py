@@ -439,30 +439,33 @@ class GraphBuilderPipeline:
     async def _resolve_entities(self):
         """Step 2: Merge duplicate entities with the internal resolver."""
         try:
-            kwargs = {
-                "graph_name": self.graph_name,
-                "strategy": self.entity_resolution_strategy,
-            }
-            if self.entity_resolution_strategy == "hybrid":
-                kwargs.update(
-                    {
-                        "embedder": self.embedder,
-                        "llm": self.llm,
-                        "aliases": self.entity_resolution_aliases,
-                        "llm_guidance": self.entity_resolution_llm_guidance,
-                        "allow_ai_auto_merge": self.allow_ai_auto_merge,
-                        "context_properties": (
-                            self.entity_resolution_context_properties
-                        ),
-                        "conflict_properties": (
-                            self.entity_resolution_conflict_properties
-                        ),
-                        "context_mode": self.entity_resolution_context_mode,
-                    }
+            strategy = self.entity_resolution_strategy
+            if strategy == "exact":
+                result = await self.graph_store.resolve_entities_exact(
+                    graph_name=self.graph_name,
                 )
-            result = await self.graph_store.resolve_entities(
-                **kwargs,
-            )
+            elif strategy == "normalized":
+                result = await self.graph_store.resolve_entities_normalized(
+                    graph_name=self.graph_name,
+                )
+            elif strategy == "fuzzy":
+                result = await self.graph_store.resolve_entities_fuzzy(
+                    graph_name=self.graph_name,
+                )
+            elif strategy == "hybrid":
+                result = await self.graph_store.resolve_entities_hybrid(
+                    graph_name=self.graph_name,
+                    embedder=self.embedder,
+                    llm=self.llm,
+                    aliases=self.entity_resolution_aliases,
+                    llm_guidance=self.entity_resolution_llm_guidance,
+                    allow_ai_auto_merge=self.allow_ai_auto_merge,
+                    context_properties=self.entity_resolution_context_properties,
+                    conflict_properties=self.entity_resolution_conflict_properties,
+                    context_mode=self.entity_resolution_context_mode,
+                )
+            else:
+                raise ValueError(f"Unknown entity resolution strategy: {strategy}")
             if isinstance(result, dict) and result.get("skipped"):
                 print(f"Entity resolution skipped: reason={result.get('reason')}")
         except Exception as e:

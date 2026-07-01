@@ -85,7 +85,7 @@ class BaseEntityResolver(ABC):
         self.graph_store = graph_store
         self._merge_summaries: dict[str, dict] = {}
 
-    async def resolve(  # noqa: C901
+    async def resolve(
         self,
         *,
         graph_name: str = "entity-graph",
@@ -107,55 +107,180 @@ class BaseEntityResolver(ABC):
         if strategy not in ("exact", "normalized", "fuzzy", "hybrid"):
             raise ValueError(f"Unknown strategy: {strategy}")
 
+        if strategy == "exact":
+            return await self.resolve_exact(
+                graph_name=graph_name,
+                resolve_property=resolve_property,
+                dry_run=dry_run,
+            )
+        if strategy == "normalized":
+            return await self.resolve_normalized(
+                graph_name=graph_name,
+                resolve_property=resolve_property,
+                dry_run=dry_run,
+            )
+        if strategy == "fuzzy":
+            return await self.resolve_fuzzy(
+                graph_name=graph_name,
+                resolve_property=resolve_property,
+                dry_run=dry_run,
+                merge_threshold=merge_threshold,
+                review_threshold=review_threshold,
+                max_candidates_per_entity=max_candidates_per_entity,
+            )
+        return await self.resolve_hybrid(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+            aliases=aliases,
+            embedder=embedder,
+            llm=llm,
+            llm_guidance=llm_guidance,
+            allow_ai_auto_merge=allow_ai_auto_merge,
+            context_properties=context_properties,
+            conflict_properties=conflict_properties,
+            context_mode=context_mode,
+        )
+
+    async def resolve_exact(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
         preflight_result = self._preflight(dry_run=dry_run)
         if preflight_result is not None:
             return preflight_result
-
         entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups = self._build_exact_groups(entities)
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="exact",
+            signals={"exact": "used"},
+        )
 
-        ai_merged_review_groups = []
+    async def resolve_normalized(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        preflight_result = self._preflight(dry_run=dry_run)
+        if preflight_result is not None:
+            return preflight_result
+        entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups = self._build_normalized_groups(entities)
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="normalized",
+            signals={"normalized": "used"},
+        )
 
-        if strategy == "exact":
-            groups, review_groups = self._build_exact_groups(entities)
-            signals = {"exact": "used"}
-        elif strategy == "normalized":
-            groups, review_groups = self._build_normalized_groups(entities)
-            signals = {"normalized": "used"}
-        elif strategy == "fuzzy":
-            groups, review_groups, _ = self._build_fuzzy_groups(
-                entities,
-                merge_threshold=merge_threshold,
-                review_threshold=review_threshold,
-                max_candidates_per_entity=max_candidates_per_entity,
-            )
-            signals = {"normalized": "used", "fuzzy": "used"}
-        else:
-            (
-                groups,
-                review_groups,
-                ai_merged_review_groups,
-            ) = await self._build_hybrid_groups(
-                entities,
-                merge_threshold=merge_threshold,
-                review_threshold=review_threshold,
-                max_candidates_per_entity=max_candidates_per_entity,
-                aliases=aliases,
-                embedder=embedder,
-                llm=llm,
-                llm_guidance=llm_guidance,
-                allow_ai_auto_merge=allow_ai_auto_merge,
-                context_properties=context_properties,
-                conflict_properties=conflict_properties,
-                context_mode=context_mode,
-            )
-            signals = {
+    async def resolve_fuzzy(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+    ) -> dict:
+        preflight_result = self._preflight(dry_run=dry_run)
+        if preflight_result is not None:
+            return preflight_result
+        entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups, _ = self._build_fuzzy_groups(
+            entities,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+        )
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="fuzzy",
+            signals={"normalized": "used", "fuzzy": "used"},
+        )
+
+    async def resolve_hybrid(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+        aliases: Optional[dict] = None,
+        embedder=None,
+        llm=None,
+        llm_guidance: Optional[str] = None,
+        allow_ai_auto_merge: bool = False,
+        context_properties: Optional[dict[str, list[str]] | list[str]] = None,
+        conflict_properties: Optional[dict[str, list[str]] | list[str]] = None,
+        context_mode: str = "safe_defaults",
+    ) -> dict:
+        preflight_result = self._preflight(dry_run=dry_run)
+        if preflight_result is not None:
+            return preflight_result
+        entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups, ai_merged_review_groups = await self._build_hybrid_groups(
+            entities,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+            aliases=aliases,
+            embedder=embedder,
+            llm=llm,
+            llm_guidance=llm_guidance,
+            allow_ai_auto_merge=allow_ai_auto_merge,
+            context_properties=context_properties,
+            conflict_properties=conflict_properties,
+            context_mode=context_mode,
+        )
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="hybrid",
+            signals={
                 "normalized": "used",
                 "fuzzy": "used",
                 "aliases": "used" if aliases else "skipped_no_aliases",
                 "embeddings": "used" if embedder else "skipped_no_embedder",
                 "llm": "used" if llm else "skipped_no_llm",
-            }
+            },
+            llm=llm,
+            ai_merged_review_groups=ai_merged_review_groups,
+        )
 
+    async def _finish_resolution(
+        self,
+        *,
+        groups: list[list[_EntityRecord]],
+        review_groups: list[dict],
+        dry_run: bool,
+        resolve_property: str,
+        strategy: str,
+        signals: dict,
+        llm=None,
+        ai_merged_review_groups: Optional[list[dict]] = None,
+    ) -> dict:
         merged_nodes = 0
         if not dry_run and groups:
             self._merge_summaries = await self._prepare_merge_summaries(groups, llm)
@@ -168,7 +293,7 @@ class BaseEntityResolver(ABC):
             "merged_nodes": merged_nodes,
             "candidate_groups": len(groups) + len(review_groups),
             "review_groups": review_groups,
-            "ai_merged_review_groups": ai_merged_review_groups,
+            "ai_merged_review_groups": ai_merged_review_groups or [],
             "signals": signals,
         }
 

@@ -68,12 +68,19 @@ def parse_args():
 
 async def _dedup_dry_run(store, strategy: str, embedder, llm) -> dict:
     try:
-        return await store.resolve_entities(
-            strategy=strategy,
-            dry_run=True,
-            embedder=embedder if strategy == "hybrid" else None,
-            llm=llm if strategy == "hybrid" else None,
-        )
+        if strategy == "exact":
+            return await store.resolve_entities_exact(dry_run=True)
+        if strategy == "normalized":
+            return await store.resolve_entities_normalized(dry_run=True)
+        if strategy == "fuzzy":
+            return await store.resolve_entities_fuzzy(dry_run=True)
+        if strategy == "hybrid":
+            return await store.resolve_entities_hybrid(
+                dry_run=True,
+                embedder=embedder,
+                llm=llm,
+            )
+        return {"error": f"Unknown strategy: {strategy}"}
     except Exception as exc:
         return {"error": str(exc)}
 

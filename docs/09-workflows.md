@@ -454,9 +454,11 @@ See [`recon_graphrag/graphdb/base.py`](../recon_graphrag/graphdb/base.py) for th
 
 `GraphBuilderPipeline` calls entity resolution for you after writing extracted
 entities, but the same operation is also available directly on any graph store
-that implements `GraphStore.resolve_entities()`. Use this when you have already
-loaded graph data and want to inspect or merge duplicate entities without
-running extraction again.
+through the strategy-specific methods: `GraphStore.resolve_entities_exact()`,
+`GraphStore.resolve_entities_normalized()`, `GraphStore.resolve_entities_fuzzy()`,
+and `GraphStore.resolve_entities_hybrid()`. Use these when you have already loaded
+graph data and want to inspect or merge duplicate entities without running
+extraction again.
 
 Start with a dry run:
 
@@ -469,9 +471,8 @@ from examples.config import get_neo4j_store
 async def main():
     store = get_neo4j_store()
 
-    result = await store.resolve_entities(
+    result = await store.resolve_entities_normalized(
         graph_name="entity-graph",
-        strategy="normalized",
         dry_run=True,
     )
     print(result)
@@ -480,26 +481,37 @@ async def main():
 asyncio.run(main())
 ```
 
-Then run the same strategy without `dry_run` to apply merges:
+Then run the same method without `dry_run` to apply merges:
 
 ```python
-result = await store.resolve_entities(
+result = await store.resolve_entities_normalized(
     graph_name="entity-graph",
-    strategy="normalized",
     dry_run=False,
 )
 ```
 
-Supported strategies:
+Supported methods:
 
-| Strategy | Behavior |
+| Method | Behavior |
 | ---- | ---- |
-| `exact` | Merge entities with the same raw `resolve_property` value. |
-| `normalized` | Merge case, punctuation, whitespace, and common organization-suffix variants. |
-| `fuzzy` | Use string similarity to merge high-confidence matches and return lower-confidence review candidates. |
-| `hybrid` | Combine normalized/fuzzy matching with optional aliases, embeddings, and LLM review. |
+| `resolve_entities_exact` | Merge entities with the same raw `resolve_property` value. |
+| `resolve_entities_normalized` | Merge case, punctuation, whitespace, and common organization-suffix variants. |
+| `resolve_entities_fuzzy` | Use string similarity to merge high-confidence matches and return lower-confidence review candidates. |
+| `resolve_entities_hybrid` | Combine normalized/fuzzy matching with optional aliases, embeddings, and LLM review. |
 
-For `hybrid`, pass the extra signals you want to use:
+For `resolve_entities_fuzzy`, pass fuzzy-specific thresholds:
+
+```python
+result = await store.resolve_entities_fuzzy(
+    graph_name="entity-graph",
+    dry_run=True,
+    merge_threshold=95.0,
+    review_threshold=85.0,
+    max_candidates_per_entity=20,
+)
+```
+
+For `resolve_entities_hybrid`, pass the extra signals you want to use:
 
 ```python
 from examples.config import get_embedder, get_llm, get_neo4j_store
@@ -508,9 +520,8 @@ store = get_neo4j_store()
 embedder = get_embedder()
 llm = get_llm()
 
-result = await store.resolve_entities(
+result = await store.resolve_entities_hybrid(
     graph_name="entity-graph",
-    strategy="hybrid",
     dry_run=True,
     embedder=embedder,
     llm=llm,
@@ -530,9 +541,8 @@ readable keys, aliases, labels, and non-internal properties. You can narrow the
 extra properties sent to the LLM:
 
 ```python
-result = await store.resolve_entities(
+result = await store.resolve_entities_hybrid(
     graph_name="entity-graph",
-    strategy="hybrid",
     dry_run=True,
     embedder=embedder,
     llm=llm,
@@ -547,9 +557,8 @@ Use conflict properties when same-name entities should stay separate if a
 domain key differs:
 
 ```python
-result = await store.resolve_entities(
+result = await store.resolve_entities_hybrid(
     graph_name="entity-graph",
-    strategy="hybrid",
     dry_run=True,
     embedder=embedder,
     llm=llm,
@@ -571,9 +580,8 @@ candidates. To let hybrid resolution apply LLM-approved merges, opt in
 explicitly:
 
 ```python
-result = await store.resolve_entities(
+result = await store.resolve_entities_hybrid(
     graph_name="entity-graph",
-    strategy="hybrid",
     embedder=embedder,
     llm=llm,
     allow_ai_auto_merge=True,
@@ -597,7 +605,7 @@ There are two deduplication moments in the graph-building flow:
 | Step | Where it happens | Scope |
 | ---- | ---- | ---- |
 | Assembly deduplication | `GraphDocumentAssembler` | In-memory, within the `GraphDocument` being assembled from one extraction run. It collapses repeated extracted entities and relationships before database write. |
-| Entity resolution | `GraphStore.resolve_entities()` | Database-level, across persisted `__Entity__` nodes for a `graph_name`. This is the same resolver that `GraphBuilderPipeline` calls when `perform_entity_resolution=True`. |
+| Entity resolution | `GraphStore.resolve_entities_*` | Database-level, across persisted `__Entity__` nodes for a `graph_name`. This is the same resolver that `GraphBuilderPipeline` calls when `perform_entity_resolution=True`. |
 
 So independent entity resolution is not a different algorithm from the
 GraphBuilderPipeline step. It is the same store-level resolver, called manually.
