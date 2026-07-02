@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from rapidfuzz import fuzz
+
 from recon_graphrag.graphdb.entity_resolution_context import (
     blocked_review_group,
     build_entity_profiles,
@@ -430,17 +432,22 @@ class BaseEntityResolver(ABC):
             candidates = self._blocked_candidates(
                 e1, singletons, max_candidates_per_entity, used
             )
+            # Gather every candidate that matches the anchor e1 directly into a
+            # single group (star, not chain), so >2 variants of one entity merge
+            # in a single pass. Direct-match only: no transitive A~B~C chaining,
+            # which keeps the merge conservative against over-collapsing.
+            group = [e1]
             for e2 in candidates:
+                if e2.node_id in used:
+                    continue
                 pair_key = frozenset({e1.node_id, e2.node_id})
                 if pair_key in reviewed_pairs:
                     continue
                 score = self._fuzzy_score(e1, e2)
+                reviewed_pairs.add(pair_key)
                 if score >= merge_threshold:
-                    fuzzy_groups.append([e1, e2])
-                    used.add(e1.node_id)
+                    group.append(e2)
                     used.add(e2.node_id)
-                    reviewed_pairs.add(pair_key)
-                    break
                 elif score >= review_threshold:
                     review_groups.append(
                         {
@@ -456,11 +463,11 @@ class BaseEntityResolver(ABC):
                             "decision": "review",
                         }
                     )
-                    reviewed_pairs.add(pair_key)
-                    break
                 else:
                     dropped_pairs.append((e1, e2, score))
-                    reviewed_pairs.add(pair_key)
+            if len(group) > 1:
+                used.add(e1.node_id)
+                fuzzy_groups.append(group)
 
         return normalized_groups + fuzzy_groups, review_groups, dropped_pairs
 
@@ -503,12 +510,7 @@ class BaseEntityResolver(ABC):
 
     @staticmethod
     def _fuzzy_score(e1: _EntityRecord, e2: _EntityRecord) -> float:
-        try:
-            from rapidfuzz import fuzz  # type: ignore[import-untyped]
-
-            return float(fuzz.ratio(e1.normalized_value, e2.normalized_value))
-        except ImportError:
-            return 0.0
+        return float(fuzz.ratio(e1.normalized_value, e2.normalized_value))
 
     async def _build_hybrid_groups(
         self,
@@ -556,8 +558,6 @@ class BaseEntityResolver(ABC):
             active_review_groups = await self._score_with_embeddings(
                 active_review_groups,
                 embedder,
-                allow_ai_auto_merge,
-                merge_threshold,
                 concurrency=self._llm_concurrency,
             )
 
@@ -768,8 +768,6 @@ class BaseEntityResolver(ABC):
         self,
         review_groups: list[dict],
         embedder,
-        allow_ai_auto_merge: bool,
-        merge_threshold: float,
         concurrency: int | None = None,
     ) -> list[dict]:
         """Score review groups by embedding cosine similarity, concurrently."""

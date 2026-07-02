@@ -111,7 +111,8 @@ class _Neo4jEntityResolver(BaseEntityResolver):
                 SET node.{escape_cypher_identifier(resolve_property)} = $canonical_name,
                     node.id = $canonical_entity_id,
                     node.canonical_key = coalesce($canonical_key, node.canonical_key),
-                    node.human_readable_id = coalesce($canonical_readable_id, node.human_readable_id)
+                    node.human_readable_id = coalesce($canonical_readable_id, node.human_readable_id),
+                    node.embedding = null
                 RETURN elementId(node) AS merged_id
                 """,
                 {

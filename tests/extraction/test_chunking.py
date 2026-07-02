@@ -201,6 +201,46 @@ def test_text_chunker_token_stable_ids():
     assert chunks[1].id == "doc1:chunk:1"
 
 
+class _WhitespaceIdCounter:
+    """Token counter exposing encode/decode (triggers the fast path).
+
+    Models a byte-level tokenizer: each token carries its own trailing
+    whitespace, so ``decode`` is exact concatenation and slicing token IDs
+    reconstructs the original substring — the property tiktoken guarantees.
+    """
+
+    def encode(self, text):
+        import re
+
+        return re.findall(r"\S+\s*", text)
+
+    def decode(self, tokens):
+        return "".join(tokens)
+
+    def count(self, text):
+        return len(self.encode(text))
+
+    def truncate(self, text, max_tokens):
+        return "".join(self.encode(text)[:max_tokens])
+
+
+def test_text_chunker_token_fast_path_reconstructs_source():
+    counter = _WhitespaceIdCounter()
+    chunker = TextChunker(
+        chunk_size=5, chunk_overlap=1, unit="tokens", token_counter=counter
+    )
+    text = " ".join(f"w{i}" for i in range(30))
+    chunks = chunker.chunk_text(text, document_id="doc1")
+
+    assert len(chunks) > 1
+    # char offsets must slice the original text back to each chunk verbatim
+    for chunk in chunks:
+        m = chunk.metadata
+        assert text[m["char_start"]:m["char_end"]] == chunk.text
+    # overlap: consecutive chunks share tokens (token_start advances by step=4)
+    assert chunks[1].metadata["token_start"] == 4
+
+
 def test_text_chunker_token_char_mode_unchanged():
     """Existing character-mode tests must still work."""
     chunker = TextChunker(chunk_size=10, chunk_overlap=2)

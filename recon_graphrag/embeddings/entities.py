@@ -38,11 +38,25 @@ class EntityEmbedder:
         """
         total = 0
         semaphore = asyncio.Semaphore(self.concurrency)
+        last_batch_ids: frozenset | None = None
 
         while True:
             entities = self.graph_store.get_unembedded_entities(limit=batch_size)
             if not entities:
                 break
+
+            # No-forward-progress guard: if the store hands back the same batch
+            # it just did, embedding it again cannot change the result — persistent
+            # embed failures (or an upsert that doesn't clear `embedding IS NULL`)
+            # would otherwise loop here forever.
+            batch_ids = frozenset(e["id"] for e in entities)
+            if batch_ids == last_batch_ids:
+                print(
+                    f"  Stopping: {len(entities)} entities could not be embedded "
+                    f"(no progress). Leaving them unembedded."
+                )
+                break
+            last_batch_ids = batch_ids
 
             async def _embed(entity: dict) -> tuple[str, list[float]] | None:
                 async with semaphore:

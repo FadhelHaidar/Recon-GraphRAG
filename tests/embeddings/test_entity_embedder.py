@@ -34,6 +34,41 @@ def fake_embedder():
     return embedder
 
 
+class StuckGraphStore:
+    """Never clears unembedded entities — models persistent embed failure."""
+
+    def __init__(self, entities):
+        self._entities = entities
+        self.fetches = 0
+        self.upserted = []
+
+    def get_unembedded_entities(self, limit=500):
+        self.fetches += 1
+        return list(self._entities[:limit])
+
+    def upsert_vectors(self, ids, property_name, vectors):
+        self.upserted.append((ids, property_name, vectors))
+
+
+@pytest.mark.asyncio
+async def test_embed_entities_terminates_when_batch_never_clears():
+    import asyncio
+
+    store = StuckGraphStore(entities=[{"id": "e1", "name": "Broken", "labels": ["Movie"]}])
+    embedder = MagicMock()
+    embedder.async_embed_query = AsyncMock(side_effect=RuntimeError("embedder down"))
+
+    # Without the no-progress guard this loops forever; bound it so a regression
+    # fails loudly instead of hanging.
+    await asyncio.wait_for(
+        EntityEmbedder(store, embedder).embed_entities(batch_size=500),
+        timeout=5,
+    )
+
+    assert store.upserted == []
+    assert store.fetches == 2  # first attempt, then the repeat that trips the guard
+
+
 @pytest.mark.asyncio
 async def test_embed_entities_accepts_list_description(fake_embedder):
     store = FakeGraphStore(entities=[
