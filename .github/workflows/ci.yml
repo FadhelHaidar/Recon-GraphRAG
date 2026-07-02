@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   tests:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -33,8 +34,36 @@ jobs:
       - name: Run mandatory tests
         run: uv run pytest -m "not integration"
 
+  build-validation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --group dev
+
+      - name: Build package
+        run: uv build
+
+      - name: Validate package
+        run: |
+          pip install twine
+          twine check dist/*
+
   release-please:
-    needs: tests
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
