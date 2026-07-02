@@ -62,9 +62,9 @@ JSON format:
   ]
 }}
 
-If there are no valid findings, return an empty findings array.
+Produce at least one finding grounded in the allowlist.
 Do NOT reference IDs not present in the allowlist.
-"""
+{length_instruction}"""
 
 
 @dataclass
@@ -83,6 +83,7 @@ def build_report_prompt(
     context: str,
     reference_ids: list[str],
     rubric: ReportRubric | None = None,
+    max_report_words: int | None = 2000,
 ) -> str:
     """Build a structured report prompt for a community.
 
@@ -92,12 +93,19 @@ def build_report_prompt(
         context: Rendered community context text.
         reference_ids: Valid reference IDs that findings may cite.
         rubric: Rating rubric. Uses default if None.
+        max_report_words: Soft word limit stated in the prompt. None omits
+            the instruction (only the LLM's max_tokens then bounds output).
 
     Returns:
         Prompt string requesting structured JSON report.
     """
     rubric = rubric or ReportRubric()
     ref_list = "\n".join(f"  - {rid}" for rid in reference_ids)
+    length_instruction = (
+        f"Limit the total report length to {max_report_words} words.\n"
+        if max_report_words
+        else ""
+    )
     return DEFAULT_REPORT_PROMPT.format(
         community_id=community_id,
         level=level,
@@ -107,6 +115,7 @@ def build_report_prompt(
         max_rating=rubric.max_rating,
         rating_name=rubric.rating_name,
         rating_description=rubric.rating_description,
+        length_instruction=length_instruction,
     )
 
 

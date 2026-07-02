@@ -168,6 +168,18 @@ class TestReportParser:
             parser.parse(json.dumps(data), community_id="1", level=0)
         assert "title" in str(exc.value.errors)
 
+    def test_prompt_word_limit_optional(self):
+        from recon_graphrag.communities.reports import build_report_prompt
+
+        kwargs = dict(community_id="1", level=0, context="ctx", reference_ids=["e1"])
+        assert "Limit the total report length to 2000 words." in build_report_prompt(**kwargs)
+        assert "Limit the total report length to 500 words." in build_report_prompt(
+            **kwargs, max_report_words=500
+        )
+        assert "Limit the total report length" not in build_report_prompt(
+            **kwargs, max_report_words=None
+        )
+
     def test_parse_rejects_empty_findings(self):
         parser = ReportParser()
         data = {"title": "T", "summary": "S", "findings": []}

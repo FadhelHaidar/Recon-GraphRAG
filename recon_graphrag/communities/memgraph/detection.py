@@ -158,12 +158,16 @@ class CommunityDetector:
         # MAGE leiden_community_detection.get_subgraph scopes the algorithm to the
         # selected entity subgraph. The procedure accepts optional arguments
         # positionally after the two required subgraph arguments. The order is:
-        # weight_property, gamma, theta, resolution_parameter, number_of_iterations.
+        # weight, gamma, theta, resolution_parameter, max_iterations.
+        #
+        # gamma is the resolution/granularity knob (higher -> more, smaller
+        # communities); self.gamma feeds it, matching the Neo4j backend's gamma
+        # so both resolve at the same granularity. MAGE's `resolution_parameter`
+        # is misleadingly named: it's the minimum modularity change when merging
+        # (a convergence threshold), so self.tolerance correctly maps there.
         #
         # There is no random seed parameter exposed by MAGE; self.random_seed is
         # kept for API symmetry with the Neo4j backend but is not forwarded.
-        # `tolerance` maps to the 4th optional argument (resolution_parameter),
-        # the closest MAGE equivalent to a Leiden convergence threshold.
         weight_property = self.relationship_weight_property or "weight"
         params: dict[str, Any] = {
             "graph_name": self.graph_name,
@@ -172,7 +176,6 @@ class CommunityDetector:
             "theta": self.theta,
             "tolerance": self.tolerance,
             "relationship_types": valid_types,
-            "entity_label": self.entity_label,
         }
 
         query = f"""

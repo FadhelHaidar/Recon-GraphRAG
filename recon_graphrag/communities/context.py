@@ -175,7 +175,6 @@ def pack_community_context(
     used_tokens = 0
     truncated = False
     included_edges = 0
-    excluded_edges = 0
     included_entities = 0
 
     for edge in context.edges:
@@ -207,8 +206,14 @@ def pack_community_context(
             seen_entities.add(edge.target.id)
             included_edges += 1
         else:
+            # Stop at the first edge that doesn't fit so included_edges stays a
+            # true prefix of the ranked list. build_packed_reference_ids rebuilds
+            # the allowlist as edges[:included_edges]; a keep-trying fill would
+            # desync the two and drop valid findings that cite a shown edge.
             truncated = True
-            excluded_edges += 1
+            break
+
+    excluded_edges = len(context.edges) - included_edges
 
     # Isolated entities
     for entity in context.entities:
@@ -225,6 +230,7 @@ def pack_community_context(
             included_entities += 1
         else:
             truncated = True
+            break
 
     total_entities = len({e.id for e in _all_entities(context)})
     excluded_entities = total_entities - len(seen_entities)

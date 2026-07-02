@@ -71,6 +71,7 @@ class CommunitySummarizer:
         concurrency: int = 5,
         max_context_tokens: int | None = None,
         token_counter: TokenCounter | None = None,
+        max_report_words: int | None = 2000,
     ):
         self.graph_store = graph_store
         self.llm = llm
@@ -79,6 +80,7 @@ class CommunitySummarizer:
         self.concurrency = concurrency
         self.max_context_tokens = max_context_tokens
         self.token_counter = token_counter
+        self.max_report_words = max_report_words
         self._report_parser = ReportParser()
 
     async def generate_all(
@@ -257,6 +259,7 @@ class CommunitySummarizer:
             context=context_text,
             reference_ids=reference_ids,
             rubric=self.report_rubric,
+            max_report_words=self.max_report_words,
         )
 
         # First attempt

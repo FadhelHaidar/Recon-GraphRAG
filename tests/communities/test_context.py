@@ -428,6 +428,41 @@ class TestBuildPackedReferenceIds:
         assert "e4" not in ref_ids
         assert "e3:WORKS_AT:e4" not in ref_ids
 
+    def test_allowlist_matches_shown_edges_when_early_edge_is_oversized(self):
+        """An oversized high-rank edge must not let a later edge sneak into the
+        text while its key is absent from the allowlist (or vice versa)."""
+        ctx = CommunityContext(
+            community_id="c1",
+            level=0,
+            edges=[
+                # Rank 0: huge description — won't fit the budget.
+                EdgeContext(
+                    source=EntityContext(id="e1", name="Alice", description="X" * 400, labels=["Person"], degree=9),
+                    target=EntityContext(id="e2", name="Acme", description="Y" * 400, labels=["Org"], degree=9),
+                    relationship_type="WORKS_AT",
+                    combined_degree=18,
+                ),
+                # Rank 1: tiny — would fit if the packer kept trying past edge 0.
+                EdgeContext(
+                    source=EntityContext(id="e3", name="Bo", description="eng", labels=["Person"], degree=1),
+                    target=EntityContext(id="e4", name="Co", description="biz", labels=["Org"], degree=1),
+                    relationship_type="WORKS_AT",
+                    combined_degree=2,
+                ),
+            ],
+        )
+        counter = ApproximateTokenCounter(ratio=4.0)
+        # Budget fits the small edge but not the huge one.
+        packed = pack_community_context(ctx, max_tokens=15, counter=counter)
+        ref_ids = set(build_packed_reference_ids(ctx, packed))
+
+        # Every relationship key in the allowlist must correspond to text the LLM
+        # actually saw, and every shown edge must be citable.
+        for edge in ctx.edges:
+            key = f"{edge.source.id}:{edge.relationship_type}:{edge.target.id}"
+            shown = f"{edge.source.name} --[{edge.relationship_type}]--> {edge.target.name}" in packed.text
+            assert (key in ref_ids) == shown
+
     def test_packed_refs_subset_of_full_refs(self):
         ctx = _make_large_context(10)
         counter = ApproximateTokenCounter(ratio=4.0)

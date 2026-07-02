@@ -342,10 +342,11 @@ class CommunityDetector:
         query = f"""
         MATCH (c:{community_label} {{graph_name: $graph_name}})
         OPTIONAL MATCH (c)<-[:IN_COMMUNITY]-(e:{entity_label})
+        WITH c, count(DISTINCT e) AS entity_count
         OPTIONAL MATCH (c)<-[:PARENT_COMMUNITY]-(child:{community_label})
         RETURN c.id AS community_id,
                c.level AS level,
-               count(DISTINCT e) AS entity_count,
+               entity_count,
                count(DISTINCT child) AS child_community_count
         ORDER BY c.level, entity_count DESC
         """
