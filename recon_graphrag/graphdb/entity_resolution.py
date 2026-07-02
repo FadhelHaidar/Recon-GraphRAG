@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import math
@@ -81,9 +82,10 @@ class BaseEntityResolver(ABC):
     depend on node ID semantics, Cypher functions, and merge procedures.
     """
 
-    def __init__(self, graph_store):
+    def __init__(self, graph_store, llm_concurrency: int = 5):
         self.graph_store = graph_store
         self._merge_summaries: dict[str, dict] = {}
+        self._llm_concurrency = max(int(llm_concurrency), 1)
 
     async def resolve(
         self,
@@ -283,7 +285,9 @@ class BaseEntityResolver(ABC):
     ) -> dict:
         merged_nodes = 0
         if not dry_run and groups:
-            self._merge_summaries = await self._prepare_merge_summaries(groups, llm)
+            self._merge_summaries = await self._prepare_merge_summaries(
+                groups, llm, concurrency=self._llm_concurrency
+            )
             merged_nodes = self._merge_groups(groups, resolve_property)
 
         return {
@@ -298,11 +302,19 @@ class BaseEntityResolver(ABC):
         }
 
     async def _prepare_merge_summaries(
-        self, groups: list[list[_EntityRecord]], llm
+        self,
+        groups: list[list[_EntityRecord]],
+        llm,
+        concurrency: int | None = None,
     ) -> dict[str, dict]:
-        """Normalize observations and optionally summarize merged descriptions."""
-        summaries: dict[str, dict] = {}
-        for group in groups:
+        """Normalize observations and optionally summarize merged descriptions.
+
+        Summaries are generated concurrently up to ``self._llm_concurrency``.
+        """
+        concurrency = concurrency or self._llm_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
+
+        def _collect_observations(group: list[_EntityRecord]) -> tuple[str, list[str]]:
             canonical = max(
                 group,
                 key=lambda entity: len(entity.resolve_value or ""),
@@ -319,33 +331,46 @@ class BaseEntityResolver(ABC):
                     text = str(value).strip()
                     if text and text not in observations:
                         observations.append(text)
-            deterministic = "\n".join(observations)
-            fingerprint = hashlib.sha256(
-                json.dumps(observations, ensure_ascii=True).encode("utf-8")
-            ).hexdigest()
-            summary = deterministic
-            fallback = False
-            if llm is not None and len(observations) > 1:
-                prompt = (
-                    "Consolidate these unique observations into one factual entity "
-                    "description. Preserve all non-conflicting facts and return only "
-                    f"the description.\n\n{deterministic}"
-                )
-                try:
-                    response = await llm.ainvoke(prompt)
-                    summary = response.content.strip()
-                    if not summary:
-                        raise ValueError("empty entity description summary")
-                except Exception:
-                    summary = deterministic
-                    fallback = True
-            summaries[canonical.entity_id] = {
-                "descriptions": observations,
-                "description": summary,
-                "description_input_fingerprint": fingerprint,
-                "description_summary_fallback": fallback,
-            }
-        return summaries
+            return canonical.entity_id, observations
+
+        async def _summarize(
+            entity_id: str, observations: list[str]
+        ) -> tuple[str, dict]:
+            async with semaphore:
+                deterministic = "\n".join(observations)
+                fingerprint = hashlib.sha256(
+                    json.dumps(observations, ensure_ascii=True).encode("utf-8")
+                ).hexdigest()
+                summary = deterministic
+                fallback = False
+                if llm is not None and len(observations) > 1:
+                    prompt = (
+                        "Consolidate these unique observations into one factual entity "
+                        "description. Preserve all non-conflicting facts and return only "
+                        f"the description.\n\n{deterministic}"
+                    )
+                    try:
+                        response = await llm.ainvoke(prompt)
+                        summary = response.content.strip()
+                        if not summary:
+                            raise ValueError("empty entity description summary")
+                    except Exception:
+                        summary = deterministic
+                        fallback = True
+                return entity_id, {
+                    "descriptions": observations,
+                    "description": summary,
+                    "description_input_fingerprint": fingerprint,
+                    "description_summary_fallback": fallback,
+                }
+
+        tasks = []
+        for group in groups:
+            entity_id, observations = _collect_observations(group)
+            tasks.append(asyncio.create_task(_summarize(entity_id, observations)))
+
+        results = await asyncio.gather(*tasks)
+        return {entity_id: summary for entity_id, summary in results}
 
     def _preflight(self, *, dry_run: bool) -> dict | None:
         return None
@@ -529,7 +554,11 @@ class BaseEntityResolver(ABC):
 
         if embedder and active_review_groups:
             active_review_groups = await self._score_with_embeddings(
-                active_review_groups, embedder, allow_ai_auto_merge, merge_threshold
+                active_review_groups,
+                embedder,
+                allow_ai_auto_merge,
+                merge_threshold,
+                concurrency=self._llm_concurrency,
             )
 
         # When an LLM is available, rescue candidates that fuzzy scoring
@@ -550,6 +579,7 @@ class BaseEntityResolver(ABC):
                 entities,
                 context_properties,
                 context_mode,
+                concurrency=self._llm_concurrency,
             )
         review_groups = [
             *active_review_groups,
@@ -740,23 +770,32 @@ class BaseEntityResolver(ABC):
         embedder,
         allow_ai_auto_merge: bool,
         merge_threshold: float,
+        concurrency: int | None = None,
     ) -> list[dict]:
-        for rg in review_groups:
-            names = rg.get("names", [])
-            if len(names) < 2:
-                rg["scores"]["embedding"] = None
-                continue
-            try:
-                vector_a = await embedder.async_embed_query(str(names[0]))
-                vector_b = await embedder.async_embed_query(str(names[1]))
-                rg["scores"]["embedding"] = round(
-                    self._cosine_similarity(vector_a, vector_b),
-                    4,
-                )
-            except Exception as exc:
-                rg["scores"]["embedding"] = None
-                rg["embedding_error"] = str(exc)
-        return review_groups
+        """Score review groups by embedding cosine similarity, concurrently."""
+        concurrency = concurrency or self._llm_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _score(rg: dict) -> dict:
+            async with semaphore:
+                names = rg.get("names", [])
+                if len(names) < 2:
+                    rg["scores"]["embedding"] = None
+                    return rg
+                try:
+                    vector_a = await embedder.async_embed_query(str(names[0]))
+                    vector_b = await embedder.async_embed_query(str(names[1]))
+                    rg["scores"]["embedding"] = round(
+                        self._cosine_similarity(vector_a, vector_b),
+                        4,
+                    )
+                except Exception as exc:
+                    rg["scores"]["embedding"] = None
+                    rg["embedding_error"] = str(exc)
+            return rg
+
+        tasks = [asyncio.create_task(_score(rg)) for rg in review_groups]
+        return await asyncio.gather(*tasks)
 
     def _rescue_dropped_pairs(
         self,
@@ -811,33 +850,42 @@ class BaseEntityResolver(ABC):
         entities: list[_EntityRecord],
         context_properties: Optional[dict[str, list[str]] | list[str]],
         context_mode: str,
+        concurrency: int | None = None,
     ) -> list[dict]:
+        """Review candidate groups with the LLM, up to ``concurrency`` at a time."""
+        concurrency = concurrency or self._llm_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
         entity_by_node_id = {e.node_id: e for e in entities}
-        for rg in review_groups:
-            rg["entities"] = build_entity_profiles(
-                entity_by_node_id,
-                rg.get("node_ids", []),
-                context_properties=context_properties,
-                context_mode=context_mode,
-            )
-            prompt = self._build_llm_review_prompt(rg, aliases, llm_guidance)
-            try:
-                response = await llm.ainvoke(prompt)
-                parsed = self._parse_llm_json(response.content)
-                confidence = parsed.get("confidence")
-                rg["scores"]["llm"] = confidence
-                rg["llm_review"] = {
-                    "same_entity": parsed.get("same_entity"),
-                    "confidence": confidence,
-                    "reason": parsed.get("reason"),
-                    "merge_allowed": parsed.get("merge_allowed", False),
-                }
-            except Exception as exc:
-                rg["scores"]["llm"] = None
-                rg["llm_review"] = {
-                    "error": str(exc),
-                }
-        return review_groups
+
+        async def _review(rg: dict) -> dict:
+            async with semaphore:
+                rg["entities"] = build_entity_profiles(
+                    entity_by_node_id,
+                    rg.get("node_ids", []),
+                    context_properties=context_properties,
+                    context_mode=context_mode,
+                )
+                prompt = self._build_llm_review_prompt(rg, aliases, llm_guidance)
+                try:
+                    response = await llm.ainvoke(prompt)
+                    parsed = self._parse_llm_json(response.content)
+                    confidence = parsed.get("confidence")
+                    rg["scores"]["llm"] = confidence
+                    rg["llm_review"] = {
+                        "same_entity": parsed.get("same_entity"),
+                        "confidence": confidence,
+                        "reason": parsed.get("reason"),
+                        "merge_allowed": parsed.get("merge_allowed", False),
+                    }
+                except Exception as exc:
+                    rg["scores"]["llm"] = None
+                    rg["llm_review"] = {
+                        "error": str(exc),
+                    }
+            return rg
+
+        tasks = [asyncio.create_task(_review(rg)) for rg in review_groups]
+        return await asyncio.gather(*tasks)
 
     @staticmethod
     def _build_llm_review_prompt(

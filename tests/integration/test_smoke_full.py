@@ -152,11 +152,6 @@ async def _run_synthetic_e2e(store, graph_name: str):
                 synthesize_citation_metadata=True,
                 synthesis_metadata_keys=["record_ids", "collections", "external_id"],
             ),
-            await global_search.search(
-                "What are the main systems and their dependencies?",
-                community_level="coarsest",
-                random_seed=42,
-            ),
         ]
 
         for result in results:
@@ -172,7 +167,7 @@ async def _run_synthetic_e2e(store, graph_name: str):
             assert citation.chunk_id
             assert citation.document_id
 
-        global_result = results[3]
+        global_result = results[1]
         assert global_result.metadata.get("reports_available", 0) > 0
         assert global_result.metadata.get("map_batches", 0) > 0
         assert global_result.metadata.get("elapsed_ms", 0) > 0

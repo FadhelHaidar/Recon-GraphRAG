@@ -43,6 +43,7 @@ class GraphBuilderPipeline:
         graph_name: str = "entity-graph",
         graph_writer: Optional[GraphWriter] = None,
         extraction_concurrency: int = 5,
+        document_concurrency: int = 1,
         max_gleanings: int = 1,
         extract_claims: bool = False,
         perform_entity_resolution: bool = True,
@@ -70,6 +71,7 @@ class GraphBuilderPipeline:
         self.schema = schema
         self.graph_name = graph_name
         self.extraction_concurrency = extraction_concurrency
+        self.document_concurrency = max(int(document_concurrency), 1)
         self.max_gleanings = max_gleanings
         self.extract_claims = extract_claims
         self.perform_entity_resolution = perform_entity_resolution
@@ -167,28 +169,32 @@ class GraphBuilderPipeline:
         """
         self._validate_document_envelopes(documents)
 
-        results = []
-        for envelope in documents:
-            metadata = envelope.get("metadata") or {}
-            if "text" in envelope:
-                result = await self.build_from_text(
-                    text=envelope["text"],
-                    metadata=metadata,
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                    chunk_unit=chunk_unit,
-                    token_counter=token_counter,
-                    token_encoding=token_encoding,
-                )
-            else:
-                result = await self._build_from_pages_envelope(
+        semaphore = asyncio.Semaphore(self.document_concurrency)
+
+        async def _build_one(envelope: dict) -> dict:
+            async with semaphore:
+                metadata = envelope.get("metadata") or {}
+                if "text" in envelope:
+                    return await self.build_from_text(
+                        text=envelope["text"],
+                        metadata=metadata,
+                        chunk_size=chunk_size,
+                        chunk_overlap=chunk_overlap,
+                        chunk_unit=chunk_unit,
+                        token_counter=token_counter,
+                        token_encoding=token_encoding,
+                    )
+                return await self._build_from_pages_envelope(
                     pages=envelope["pages"],
                     metadata=metadata,
                     window_size=window_size,
                     window_overlap=window_overlap,
                 )
-            results.append(result)
-        return results
+
+        tasks = [
+            asyncio.create_task(_build_one(envelope)) for envelope in documents
+        ]
+        return await asyncio.gather(*tasks)
 
     async def _build_from_pages_envelope(
         self,

@@ -77,17 +77,23 @@ async def extract_to_artifact(output: Path, llm_provider: str):
         chunk_extractions = {}
 
         print(f"Extracting {len(chunks)} chunks ...")
-        for i, chunk in enumerate(chunks, start=1):
-            source_ids = chunk.metadata.get("source_ids", [])
-            page_range = f"{chunk.metadata.get('page_start', '?')}-{chunk.metadata.get('page_end', '?')}"
-            sources = ", ".join(source_ids) if source_ids else "unknown"
-            print(f"[{i}/{len(chunks)}] Chunk {chunk.id} | pages {page_range} | sources: {sources}")
-            raw_extraction = await extractor.extract(text=chunk.text, schema=MOVIE_SCHEMA)
+        results = await extractor.extract_all(
+            chunks,
+            MOVIE_SCHEMA,
+            concurrency=5,
+        )
+        for chunk, (chunk_id, raw_extraction, _) in zip(chunks, results):
             validated = validator.validate(raw_extraction, MOVIE_SCHEMA)
             chunk_extractions[chunk.id] = validated
+            node_count = len(validated.nodes)
+            rel_count = len(validated.relationships)
+            page_range = (
+                f"{chunk.metadata.get('page_start', '?')}-"
+                f"{chunk.metadata.get('page_end', '?')}"
+            )
             print(
-                f"  [{i}/{len(chunks)}] extracted "
-                f"({len(validated.nodes)} nodes, {len(validated.relationships)} rels)"
+                f"  Chunk {chunk_id} | pages {page_range} | "
+                f"extracted ({node_count} nodes, {rel_count} rels)"
             )
 
         # 3. Assemble a neutral GraphDocument
