@@ -111,32 +111,6 @@ class BaseGraphStore:
             params = {"graph_name": graph_name}
         return self.execute_query(query, params)
 
-    def store_community_summary(
-        self,
-        community_id: str,
-        level: int,
-        summary: str,
-        graph_name: str,
-    ) -> None:
-        query = """
-        MATCH (c:Community {
-            graph_name: $graph_name,
-            id: $cid,
-            level: $level
-        })
-        SET c.summary = $summary,
-            c.updated = timestamp()
-        """
-        self.execute_query(
-            query,
-            {
-                "graph_name": graph_name,
-                "cid": community_id,
-                "level": level,
-                "summary": summary,
-            },
-        )
-
     def store_community_report(
         self,
         report: CommunityReport,
@@ -152,15 +126,21 @@ class BaseGraphStore:
         SET c.report_json = $report_json,
             c.report_text = $report_text,
             c.title = $title,
-            c.summary = $report_text,
             c.rating = $rating,
             c.rating_explanation = $rating_explanation,
             c.report_status = 'success',
             c.report_error = NULL,
             c.schema_version = $schema_version,
             c.prompt_version = $prompt_version,
-            c.input_fingerprint = $input_fingerprint,
+            c.context_tokens_used = $context_tokens_used,
+            c.context_truncated = $context_truncated,
             c.updated = timestamp()
+        WITH c
+        WHERE c.input_fingerprint <> $input_fingerprint
+           OR c.input_fingerprint IS NULL
+        SET c.input_fingerprint = $input_fingerprint,
+            c.report_embedding = NULL,
+            c.report_embedding_error = NULL
         """
         self.execute_query(
             query,
@@ -176,6 +156,8 @@ class BaseGraphStore:
                 "schema_version": report.version.schema_version,
                 "prompt_version": report.version.prompt_version,
                 "input_fingerprint": report.version.input_fingerprint,
+                "context_tokens_used": report.context_tokens_used,
+                "context_truncated": report.context_truncated,
             },
         )
 
@@ -224,6 +206,11 @@ class BaseGraphStore:
                c.claim_type AS claim_type,
                c.description AS description,
                c.status AS status,
+               c.start_date AS start_date,
+               c.end_date AS end_date,
+               c.object_entity_id AS object_entity_id,
+               c.source_text AS source_text,
+               c.text_unit_id AS text_unit_id,
                ch.id AS chunk_id
         ORDER BY c.claim_type, c.id
         """
@@ -256,3 +243,50 @@ class BaseGraphStore:
             query,
             {"graph_name": graph_name, "chunk_ids": chunk_ids},
         )
+
+    def get_unembedded_community_reports(
+        self,
+        graph_name: str,
+        limit: int = 500,
+    ) -> list[dict]:
+        query = """
+        MATCH (c:Community {graph_name: $graph_name})
+        WHERE c.report_embedding IS NULL
+          AND c.report_embedding_error IS NULL
+          AND coalesce(c.report_text, '') <> ''
+        RETURN c.id AS id,
+               c.level AS level,
+               c.report_text AS report_text,
+               coalesce(c.title, '') AS title
+        LIMIT $limit
+        """
+        return self.execute_query(
+            query, {"graph_name": graph_name, "limit": limit}
+        )
+
+    def upsert_community_report_vectors(
+        self,
+        node_ids: list[str],
+        vectors: list[list[float]],
+        graph_name: str,
+        levels: list[int],
+    ) -> None:
+        if not node_ids:
+            return
+        if len(node_ids) != len(vectors) or len(node_ids) != len(levels):
+            raise ValueError("node_ids, vectors, and levels must have the same length")
+        query = """
+        UNWIND $pairs AS pair
+        MATCH (c:Community {
+            graph_name: $graph_name,
+            id: pair.node_id,
+            level: pair.level
+        })
+        SET c.report_embedding = pair.vector,
+            c.report_embedding_error = NULL
+        """
+        pairs = [
+            {"node_id": nid, "level": level, "vector": vec}
+            for nid, level, vec in zip(node_ids, levels, vectors)
+        ]
+        self.execute_query(query, {"graph_name": graph_name, "pairs": pairs})

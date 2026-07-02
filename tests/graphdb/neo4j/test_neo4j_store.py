@@ -44,16 +44,16 @@ def test_execute_query_translates_records():
 
 
 @pytest.mark.asyncio
-async def test_resolve_entities_forwards_full_advanced_parameter_set(monkeypatch):
+async def test_resolve_entities_hybrid_forwards_full_advanced_parameter_set(monkeypatch):
     captured = {}
 
     class CapturingResolver:
         def __init__(self, graph_store):
             captured["graph_store"] = graph_store
 
-        async def resolve(self, **kwargs):
+        async def resolve_hybrid(self, **kwargs):
             captured["kwargs"] = kwargs
-            return {"strategy": kwargs["strategy"]}
+            return {"strategy": "hybrid"}
 
     monkeypatch.setattr(entity_resolution, "_Neo4jEntityResolver", CapturingResolver)
     driver = FakeDriver()
@@ -64,9 +64,8 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(monkeypatch
     context_properties = {"Person": ["description", "birth_date"]}
     conflict_properties = {"Movie": ["year"]}
 
-    result = await store.resolve_entities(
+    result = await store.resolve_entities_hybrid(
         graph_name="movie-graph",
-        strategy="hybrid",
         resolve_property="title",
         dry_run=True,
         merge_threshold=91.0,
@@ -86,7 +85,6 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(monkeypatch
     assert captured["graph_store"] is store
     assert captured["kwargs"] == {
         "graph_name": "movie-graph",
-        "strategy": "hybrid",
         "resolve_property": "title",
         "dry_run": True,
         "merge_threshold": 91.0,
@@ -100,6 +98,105 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(monkeypatch
         "context_properties": context_properties,
         "conflict_properties": conflict_properties,
         "context_mode": "config_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_exact_forwards_basic_parameters(monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_exact(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "exact"}
+
+    monkeypatch.setattr(entity_resolution, "_Neo4jEntityResolver", CapturingResolver)
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver, database="neo4j")
+
+    result = await store.resolve_entities_exact(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+    )
+
+    assert result == {"strategy": "exact"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_normalized_forwards_basic_parameters(monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_normalized(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "normalized"}
+
+    monkeypatch.setattr(entity_resolution, "_Neo4jEntityResolver", CapturingResolver)
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver, database="neo4j")
+
+    result = await store.resolve_entities_normalized(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+    )
+
+    assert result == {"strategy": "normalized"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_fuzzy_forwards_fuzzy_parameters(monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_fuzzy(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "fuzzy"}
+
+    monkeypatch.setattr(entity_resolution, "_Neo4jEntityResolver", CapturingResolver)
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver, database="neo4j")
+
+    result = await store.resolve_entities_fuzzy(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+        merge_threshold=91.0,
+        review_threshold=72.0,
+        max_candidates_per_entity=7,
+    )
+
+    assert result == {"strategy": "fuzzy"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+        "merge_threshold": 91.0,
+        "review_threshold": 72.0,
+        "max_candidates_per_entity": 7,
     }
 
 
@@ -182,6 +279,19 @@ def test_vector_search_runs_vector_procedure_with_label_filter():
     assert "WHERE node:`__Entity__`" in query
     assert params["k"] == 5
     assert params["top_k"] == 5
+
+
+def test_community_report_vector_search_overfetches_and_scopes():
+    driver = FakeDriver()
+    store = Neo4jGraphStore(driver)
+
+    store.vector_search_community_reports([0.1], "graph-a", top_k=3, level=0)
+
+    query, params = driver.calls[-1]
+    assert "db.index.vector.queryNodes" in query
+    assert "c.graph_name = $graph_name" in query
+    assert params["candidate_k"] == 15
+    assert params["level"] == 0
 
 
 def test_keyword_search_runs_fulltext_procedure_with_label_filter():

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import hashlib
 import math
 import re
 import unicodedata
@@ -80,10 +82,12 @@ class BaseEntityResolver(ABC):
     depend on node ID semantics, Cypher functions, and merge procedures.
     """
 
-    def __init__(self, graph_store):
+    def __init__(self, graph_store, llm_concurrency: int = 5):
         self.graph_store = graph_store
+        self._merge_summaries: dict[str, dict] = {}
+        self._llm_concurrency = max(int(llm_concurrency), 1)
 
-    async def resolve(  # noqa: C901
+    async def resolve(
         self,
         *,
         graph_name: str = "entity-graph",
@@ -105,57 +109,185 @@ class BaseEntityResolver(ABC):
         if strategy not in ("exact", "normalized", "fuzzy", "hybrid"):
             raise ValueError(f"Unknown strategy: {strategy}")
 
+        if strategy == "exact":
+            return await self.resolve_exact(
+                graph_name=graph_name,
+                resolve_property=resolve_property,
+                dry_run=dry_run,
+            )
+        if strategy == "normalized":
+            return await self.resolve_normalized(
+                graph_name=graph_name,
+                resolve_property=resolve_property,
+                dry_run=dry_run,
+            )
+        if strategy == "fuzzy":
+            return await self.resolve_fuzzy(
+                graph_name=graph_name,
+                resolve_property=resolve_property,
+                dry_run=dry_run,
+                merge_threshold=merge_threshold,
+                review_threshold=review_threshold,
+                max_candidates_per_entity=max_candidates_per_entity,
+            )
+        return await self.resolve_hybrid(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+            aliases=aliases,
+            embedder=embedder,
+            llm=llm,
+            llm_guidance=llm_guidance,
+            allow_ai_auto_merge=allow_ai_auto_merge,
+            context_properties=context_properties,
+            conflict_properties=conflict_properties,
+            context_mode=context_mode,
+        )
+
+    async def resolve_exact(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
         preflight_result = self._preflight(dry_run=dry_run)
         if preflight_result is not None:
             return preflight_result
-
         entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups = self._build_exact_groups(entities)
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="exact",
+            signals={"exact": "used"},
+        )
 
-        ai_merged_review_groups = []
+    async def resolve_normalized(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        preflight_result = self._preflight(dry_run=dry_run)
+        if preflight_result is not None:
+            return preflight_result
+        entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups = self._build_normalized_groups(entities)
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="normalized",
+            signals={"normalized": "used"},
+        )
 
-        if strategy == "exact":
-            groups, review_groups = self._build_exact_groups(entities)
-            signals = {"exact": "used"}
-        elif strategy == "normalized":
-            groups, review_groups = self._build_normalized_groups(entities)
-            signals = {"normalized": "used"}
-        elif strategy == "fuzzy":
-            groups, review_groups = self._build_fuzzy_groups(
-                entities,
-                merge_threshold=merge_threshold,
-                review_threshold=review_threshold,
-                max_candidates_per_entity=max_candidates_per_entity,
-            )
-            signals = {"normalized": "used", "fuzzy": "used"}
-        else:
-            (
-                groups,
-                review_groups,
-                ai_merged_review_groups,
-            ) = await self._build_hybrid_groups(
-                entities,
-                merge_threshold=merge_threshold,
-                review_threshold=review_threshold,
-                max_candidates_per_entity=max_candidates_per_entity,
-                aliases=aliases,
-                embedder=embedder,
-                llm=llm,
-                llm_guidance=llm_guidance,
-                allow_ai_auto_merge=allow_ai_auto_merge,
-                context_properties=context_properties,
-                conflict_properties=conflict_properties,
-                context_mode=context_mode,
-            )
-            signals = {
+    async def resolve_fuzzy(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+    ) -> dict:
+        preflight_result = self._preflight(dry_run=dry_run)
+        if preflight_result is not None:
+            return preflight_result
+        entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups, _ = self._build_fuzzy_groups(
+            entities,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+        )
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="fuzzy",
+            signals={"normalized": "used", "fuzzy": "used"},
+        )
+
+    async def resolve_hybrid(
+        self,
+        *,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+        aliases: Optional[dict] = None,
+        embedder=None,
+        llm=None,
+        llm_guidance: Optional[str] = None,
+        allow_ai_auto_merge: bool = False,
+        context_properties: Optional[dict[str, list[str]] | list[str]] = None,
+        conflict_properties: Optional[dict[str, list[str]] | list[str]] = None,
+        context_mode: str = "safe_defaults",
+    ) -> dict:
+        preflight_result = self._preflight(dry_run=dry_run)
+        if preflight_result is not None:
+            return preflight_result
+        entities = self._load_entities(graph_name, resolve_property)
+        groups, review_groups, ai_merged_review_groups = await self._build_hybrid_groups(
+            entities,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+            aliases=aliases,
+            embedder=embedder,
+            llm=llm,
+            llm_guidance=llm_guidance,
+            allow_ai_auto_merge=allow_ai_auto_merge,
+            context_properties=context_properties,
+            conflict_properties=conflict_properties,
+            context_mode=context_mode,
+        )
+        return await self._finish_resolution(
+            groups=groups,
+            review_groups=review_groups,
+            dry_run=dry_run,
+            resolve_property=resolve_property,
+            strategy="hybrid",
+            signals={
                 "normalized": "used",
                 "fuzzy": "used",
                 "aliases": "used" if aliases else "skipped_no_aliases",
                 "embeddings": "used" if embedder else "skipped_no_embedder",
                 "llm": "used" if llm else "skipped_no_llm",
-            }
+            },
+            llm=llm,
+            ai_merged_review_groups=ai_merged_review_groups,
+        )
 
+    async def _finish_resolution(
+        self,
+        *,
+        groups: list[list[_EntityRecord]],
+        review_groups: list[dict],
+        dry_run: bool,
+        resolve_property: str,
+        strategy: str,
+        signals: dict,
+        llm=None,
+        ai_merged_review_groups: Optional[list[dict]] = None,
+    ) -> dict:
         merged_nodes = 0
         if not dry_run and groups:
+            self._merge_summaries = await self._prepare_merge_summaries(
+                groups, llm, concurrency=self._llm_concurrency
+            )
             merged_nodes = self._merge_groups(groups, resolve_property)
 
         return {
@@ -165,9 +297,80 @@ class BaseEntityResolver(ABC):
             "merged_nodes": merged_nodes,
             "candidate_groups": len(groups) + len(review_groups),
             "review_groups": review_groups,
-            "ai_merged_review_groups": ai_merged_review_groups,
+            "ai_merged_review_groups": ai_merged_review_groups or [],
             "signals": signals,
         }
+
+    async def _prepare_merge_summaries(
+        self,
+        groups: list[list[_EntityRecord]],
+        llm,
+        concurrency: int | None = None,
+    ) -> dict[str, dict]:
+        """Normalize observations and optionally summarize merged descriptions.
+
+        Summaries are generated concurrently up to ``self._llm_concurrency``.
+        """
+        concurrency = concurrency or self._llm_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
+
+        def _collect_observations(group: list[_EntityRecord]) -> tuple[str, list[str]]:
+            canonical = max(
+                group,
+                key=lambda entity: len(entity.resolve_value or ""),
+            )
+            observations: list[str] = []
+            for entity in group:
+                values = entity.properties.get("descriptions", [])
+                if not isinstance(values, list):
+                    values = [values]
+                description = entity.properties.get("description")
+                if description:
+                    values.append(description)
+                for value in values:
+                    text = str(value).strip()
+                    if text and text not in observations:
+                        observations.append(text)
+            return canonical.entity_id, observations
+
+        async def _summarize(
+            entity_id: str, observations: list[str]
+        ) -> tuple[str, dict]:
+            async with semaphore:
+                deterministic = "\n".join(observations)
+                fingerprint = hashlib.sha256(
+                    json.dumps(observations, ensure_ascii=True).encode("utf-8")
+                ).hexdigest()
+                summary = deterministic
+                fallback = False
+                if llm is not None and len(observations) > 1:
+                    prompt = (
+                        "Consolidate these unique observations into one factual entity "
+                        "description. Preserve all non-conflicting facts and return only "
+                        f"the description.\n\n{deterministic}"
+                    )
+                    try:
+                        response = await llm.ainvoke(prompt)
+                        summary = response.content.strip()
+                        if not summary:
+                            raise ValueError("empty entity description summary")
+                    except Exception:
+                        summary = deterministic
+                        fallback = True
+                return entity_id, {
+                    "descriptions": observations,
+                    "description": summary,
+                    "description_input_fingerprint": fingerprint,
+                    "description_summary_fallback": fallback,
+                }
+
+        tasks = []
+        for group in groups:
+            entity_id, observations = _collect_observations(group)
+            tasks.append(asyncio.create_task(_summarize(entity_id, observations)))
+
+        results = await asyncio.gather(*tasks)
+        return {entity_id: summary for entity_id, summary in results}
 
     def _preflight(self, *, dry_run: bool) -> dict | None:
         return None
@@ -210,13 +413,14 @@ class BaseEntityResolver(ABC):
         merge_threshold: float,
         review_threshold: float,
         max_candidates_per_entity: int,
-    ) -> tuple[list[list[_EntityRecord]], list[dict]]:
+    ) -> tuple[list[list[_EntityRecord]], list[dict], list[tuple[_EntityRecord, _EntityRecord, float]]]:
         normalized_groups, _ = self._build_normalized_groups(entities)
         merged_ids = {e.node_id for g in normalized_groups for e in g}
         singletons = [e for e in entities if e.node_id not in merged_ids]
 
         fuzzy_groups: list[list[_EntityRecord]] = []
         review_groups: list[dict] = []
+        dropped_pairs: list[tuple[_EntityRecord, _EntityRecord, float]] = []
         used = set()
         reviewed_pairs: set[frozenset] = set()
 
@@ -254,8 +458,11 @@ class BaseEntityResolver(ABC):
                     )
                     reviewed_pairs.add(pair_key)
                     break
+                else:
+                    dropped_pairs.append((e1, e2, score))
+                    reviewed_pairs.add(pair_key)
 
-        return normalized_groups + fuzzy_groups, review_groups
+        return normalized_groups + fuzzy_groups, review_groups, dropped_pairs
 
     def _blocked_candidates(
         self,
@@ -318,7 +525,7 @@ class BaseEntityResolver(ABC):
         conflict_properties: Optional[dict[str, list[str]] | list[str]],
         context_mode: str,
     ) -> tuple[list[list[_EntityRecord]], list[dict], list[dict]]:
-        groups, review_groups = self._build_fuzzy_groups(
+        groups, review_groups, dropped_pairs = self._build_fuzzy_groups(
             entities,
             merge_threshold=merge_threshold,
             review_threshold=review_threshold,
@@ -347,8 +554,19 @@ class BaseEntityResolver(ABC):
 
         if embedder and active_review_groups:
             active_review_groups = await self._score_with_embeddings(
-                active_review_groups, embedder, allow_ai_auto_merge, merge_threshold
+                active_review_groups,
+                embedder,
+                allow_ai_auto_merge,
+                merge_threshold,
+                concurrency=self._llm_concurrency,
             )
+
+        # When an LLM is available, rescue candidates that fuzzy scoring
+        # dropped.  The blocking heuristic already constrains the pool, so
+        # these are plausible matches worth LLM judgement.
+        if llm and dropped_pairs:
+            rescued = self._rescue_dropped_pairs(dropped_pairs, merged_ids)
+            active_review_groups.extend(rescued)
 
         if llm and active_review_groups:
             active_review_groups = await self._llm_review(
@@ -361,6 +579,7 @@ class BaseEntityResolver(ABC):
                 entities,
                 context_properties,
                 context_mode,
+                concurrency=self._llm_concurrency,
             )
         review_groups = [
             *active_review_groups,
@@ -551,23 +770,63 @@ class BaseEntityResolver(ABC):
         embedder,
         allow_ai_auto_merge: bool,
         merge_threshold: float,
+        concurrency: int | None = None,
     ) -> list[dict]:
-        for rg in review_groups:
-            names = rg.get("names", [])
-            if len(names) < 2:
-                rg["scores"]["embedding"] = None
+        """Score review groups by embedding cosine similarity, concurrently."""
+        concurrency = concurrency or self._llm_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _score(rg: dict) -> dict:
+            async with semaphore:
+                names = rg.get("names", [])
+                if len(names) < 2:
+                    rg["scores"]["embedding"] = None
+                    return rg
+                try:
+                    vector_a = await embedder.async_embed_query(str(names[0]))
+                    vector_b = await embedder.async_embed_query(str(names[1]))
+                    rg["scores"]["embedding"] = round(
+                        self._cosine_similarity(vector_a, vector_b),
+                        4,
+                    )
+                except Exception as exc:
+                    rg["scores"]["embedding"] = None
+                    rg["embedding_error"] = str(exc)
+            return rg
+
+        tasks = [asyncio.create_task(_score(rg)) for rg in review_groups]
+        return await asyncio.gather(*tasks)
+
+    def _rescue_dropped_pairs(
+        self,
+        dropped_pairs: list[tuple[_EntityRecord, _EntityRecord, float]],
+        merged_ids: set,
+    ) -> list[dict]:
+        """Promote fuzzy-dropped pairs to LLM review.
+
+        These pairs passed the blocking heuristic (same domain, similar
+        length, compatible first token) but scored below the fuzzy review
+        threshold.  They are plausible matches worth LLM judgement.
+        """
+        rescued: list[dict] = []
+        for e1, e2, fuzzy_score in dropped_pairs:
+            if e1.node_id in merged_ids or e2.node_id in merged_ids:
                 continue
-            try:
-                vector_a = await embedder.async_embed_query(str(names[0]))
-                vector_b = await embedder.async_embed_query(str(names[1]))
-                rg["scores"]["embedding"] = round(
-                    self._cosine_similarity(vector_a, vector_b),
-                    4,
-                )
-            except Exception as exc:
-                rg["scores"]["embedding"] = None
-                rg["embedding_error"] = str(exc)
-        return review_groups
+            rescued.append(
+                {
+                    "domain_label": e1.domain_label,
+                    "names": [e1.resolve_value, e2.resolve_value],
+                    "node_ids": [e1.node_id, e2.node_id],
+                    "reason": "llm_rescue",
+                    "scores": {
+                        "fuzzy": round(fuzzy_score, 2),
+                        "embedding": None,
+                        "llm": None,
+                    },
+                    "decision": "review",
+                }
+            )
+        return rescued
 
     @staticmethod
     def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -591,33 +850,42 @@ class BaseEntityResolver(ABC):
         entities: list[_EntityRecord],
         context_properties: Optional[dict[str, list[str]] | list[str]],
         context_mode: str,
+        concurrency: int | None = None,
     ) -> list[dict]:
+        """Review candidate groups with the LLM, up to ``concurrency`` at a time."""
+        concurrency = concurrency or self._llm_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
         entity_by_node_id = {e.node_id: e for e in entities}
-        for rg in review_groups:
-            rg["entities"] = build_entity_profiles(
-                entity_by_node_id,
-                rg.get("node_ids", []),
-                context_properties=context_properties,
-                context_mode=context_mode,
-            )
-            prompt = self._build_llm_review_prompt(rg, aliases, llm_guidance)
-            try:
-                response = await llm.ainvoke(prompt)
-                parsed = self._parse_llm_json(response.content)
-                confidence = parsed.get("confidence")
-                rg["scores"]["llm"] = confidence
-                rg["llm_review"] = {
-                    "same_entity": parsed.get("same_entity"),
-                    "confidence": confidence,
-                    "reason": parsed.get("reason"),
-                    "merge_allowed": parsed.get("merge_allowed", False),
-                }
-            except Exception as exc:
-                rg["scores"]["llm"] = None
-                rg["llm_review"] = {
-                    "error": str(exc),
-                }
-        return review_groups
+
+        async def _review(rg: dict) -> dict:
+            async with semaphore:
+                rg["entities"] = build_entity_profiles(
+                    entity_by_node_id,
+                    rg.get("node_ids", []),
+                    context_properties=context_properties,
+                    context_mode=context_mode,
+                )
+                prompt = self._build_llm_review_prompt(rg, aliases, llm_guidance)
+                try:
+                    response = await llm.ainvoke(prompt)
+                    parsed = self._parse_llm_json(response.content)
+                    confidence = parsed.get("confidence")
+                    rg["scores"]["llm"] = confidence
+                    rg["llm_review"] = {
+                        "same_entity": parsed.get("same_entity"),
+                        "confidence": confidence,
+                        "reason": parsed.get("reason"),
+                        "merge_allowed": parsed.get("merge_allowed", False),
+                    }
+                except Exception as exc:
+                    rg["scores"]["llm"] = None
+                    rg["llm_review"] = {
+                        "error": str(exc),
+                    }
+            return rg
+
+        tasks = [asyncio.create_task(_review(rg)) for rg in review_groups]
+        return await asyncio.gather(*tasks)
 
     @staticmethod
     def _build_llm_review_prompt(

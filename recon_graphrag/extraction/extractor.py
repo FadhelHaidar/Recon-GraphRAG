@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 from recon_graphrag.extraction.parser import AssessmentParser, ClaimParser, GraphExtractionParser
 from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.extraction.schema import GraphSchema
@@ -73,6 +76,7 @@ class LLMGraphExtractor:
         self,
         text: str,
         entity_ids: list[str],
+        text_unit_id: str | None = None,
     ) -> list[ExtractedClaim]:
         """Extract claims/covariates about known entities.
 
@@ -97,6 +101,8 @@ class LLMGraphExtractor:
         return self.claim_parser.parse(
             response.content,
             valid_entity_ids=set(entity_ids),
+            source_text=text[:300],
+            text_unit_id=text_unit_id,
         )
 
     async def _single_extract(self, text: str, schema: GraphSchema) -> GraphExtraction:
@@ -124,3 +130,59 @@ class LLMGraphExtractor:
         )
         response = await self.llm.ainvoke(prompt)
         return self.parser.parse(response.content)
+
+    async def extract_all(
+        self,
+        chunks: list[Any],
+        schema: GraphSchema,
+        *,
+        max_gleanings: int = 0,
+        extract_claims: bool = False,
+        concurrency: int = 5,
+    ) -> list[tuple[str, GraphExtraction, list[ExtractedClaim]]]:
+        """Extract entities/relationships from many chunks concurrently.
+
+        Args:
+            chunks: Chunk-like objects with ``id`` and ``text`` attributes, or
+                dictionaries with ``"id"`` and ``"text"`` keys.
+            schema: Graph schema defining allowed types.
+            max_gleanings: Maximum gleaning iterations per chunk.
+            extract_claims: If True, also extract claims for each chunk after
+                entity extraction.
+            concurrency: Maximum number of chunks to process concurrently.
+
+        Returns:
+            One tuple ``(chunk_id, extraction, claims)`` per input chunk, in the
+            same order as ``chunks``.
+        """
+        semaphore = asyncio.Semaphore(max(int(concurrency), 1))
+
+        def _chunk_id_and_text(chunk: Any) -> tuple[str, str]:
+            if isinstance(chunk, dict):
+                return str(chunk["id"]), str(chunk["text"])
+            chunk_id = getattr(chunk, "id", chunk)
+            text = getattr(chunk, "text", chunk)
+            return str(chunk_id), str(text)
+
+        async def _extract_one(
+            chunk: Any,
+        ) -> tuple[str, GraphExtraction, list[ExtractedClaim]]:
+            chunk_id, text = _chunk_id_and_text(chunk)
+            async with semaphore:
+                extraction = await self.extract(
+                    text=text,
+                    schema=schema,
+                    max_gleanings=max_gleanings,
+                )
+                claims: list[ExtractedClaim] = []
+                if extract_claims and extraction.nodes:
+                    entity_ids = [n.id for n in extraction.nodes]
+                    claims = await self.extract_claims(
+                        text=text,
+                        entity_ids=entity_ids,
+                        text_unit_id=chunk_id,
+                    )
+                return chunk_id, extraction, claims
+
+        tasks = [asyncio.create_task(_extract_one(chunk)) for chunk in chunks]
+        return await asyncio.gather(*tasks)

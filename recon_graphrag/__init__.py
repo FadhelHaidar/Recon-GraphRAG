@@ -6,17 +6,22 @@ from recon_graphrag._version import __version__, get_git_sha
 from recon_graphrag.pipelines.graphrag_pipeline import GraphBuilderPipeline
 
 # Retrieval
-from recon_graphrag.retrieval.search import GraphRAG
 from recon_graphrag.retrieval.base import BaseRetriever
-from recon_graphrag.retrieval.local import LocalSearchRetriever
-from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
-from recon_graphrag.retrieval.drift import DriftSearchRetriever
+from recon_graphrag.retrieval.search_local import LocalSearchRetriever
+from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
+from recon_graphrag.retrieval.search_drift import DriftSearchRetriever
+from recon_graphrag.retrieval.drift_types import (
+    DriftAction,
+    DriftQueryState,
+    DriftSearchConfig,
+)
 
 # Providers
 from recon_graphrag.llm import create_llm, BaseLLM, LLMResponse, LLMUsage
 from recon_graphrag.embeddings import (
     create_embedder,
     BaseEmbedder,
+    CommunityReportEmbedder,
     EntityEmbedder,
     ModelParamsEmbedder,
 )
@@ -58,11 +63,13 @@ __all__ = [
     # Pipelines
     "GraphBuilderPipeline",
     # Retrieval
-    "GraphRAG",
     "BaseRetriever",
     "LocalSearchRetriever",
     "GlobalSearchRetriever",
     "DriftSearchRetriever",
+    "DriftAction",
+    "DriftQueryState",
+    "DriftSearchConfig",
     # Providers
     "create_llm",
     "create_embedder",
@@ -70,6 +77,7 @@ __all__ = [
     "LLMResponse",
     "LLMUsage",
     "BaseEmbedder",
+    "CommunityReportEmbedder",
     "EntityEmbedder",
     "ModelParamsEmbedder",
     # Graph store

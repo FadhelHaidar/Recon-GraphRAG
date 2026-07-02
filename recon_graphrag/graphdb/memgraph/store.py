@@ -96,10 +96,66 @@ class MemgraphGraphStore(BaseGraphStore):
     # ------------------------------------------------------------------
     # Entity resolution
     # ------------------------------------------------------------------
-    async def resolve_entities(
+    async def resolve_entities_exact(
         self,
         graph_name: str = "entity-graph",
-        strategy: str = "normalized",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        from recon_graphrag.graphdb.memgraph.entity_resolution import (
+            _MemgraphEntityResolver,
+        )
+
+        resolver = _MemgraphEntityResolver(self)
+        return await resolver.resolve_exact(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+        )
+
+    async def resolve_entities_normalized(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        from recon_graphrag.graphdb.memgraph.entity_resolution import (
+            _MemgraphEntityResolver,
+        )
+
+        resolver = _MemgraphEntityResolver(self)
+        return await resolver.resolve_normalized(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+        )
+
+    async def resolve_entities_fuzzy(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+    ) -> dict:
+        from recon_graphrag.graphdb.memgraph.entity_resolution import (
+            _MemgraphEntityResolver,
+        )
+
+        resolver = _MemgraphEntityResolver(self)
+        return await resolver.resolve_fuzzy(
+            graph_name=graph_name,
+            resolve_property=resolve_property,
+            dry_run=dry_run,
+            merge_threshold=merge_threshold,
+            review_threshold=review_threshold,
+            max_candidates_per_entity=max_candidates_per_entity,
+        )
+
+    async def resolve_entities_hybrid(
+        self,
+        graph_name: str = "entity-graph",
         resolve_property: str = "name",
         dry_run: bool = False,
         merge_threshold: float = 95.0,
@@ -119,9 +175,8 @@ class MemgraphGraphStore(BaseGraphStore):
         )
 
         resolver = _MemgraphEntityResolver(self)
-        return await resolver.resolve(
+        return await resolver.resolve_hybrid(
             graph_name=graph_name,
-            strategy=strategy,
             resolve_property=resolve_property,
             dry_run=dry_run,
             merge_threshold=merge_threshold,
@@ -230,14 +285,18 @@ class MemgraphGraphStore(BaseGraphStore):
         label: Optional[str] = None,
         filters: Optional[dict] = None,
     ) -> list[dict]:
-        overfetch_k = max(k * 5, k) if label else k
-        label_filter = ""
+        filters = filters or {}
+        overfetch_k = max(k * 5, k) if label or filters.get("graph_name") else k
+        conditions: list[str] = []
         if label:
-            label_filter = f"WHERE node:{escape_cypher_identifier(label)}"
+            conditions.append(f"node:{escape_cypher_identifier(label)}")
+        if filters.get("graph_name") is not None:
+            conditions.append("node.graph_name = $graph_name")
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"""
         CALL vector_search.search({cypher_string_literal(index_name)}, $k, $query_vector)
         YIELD node, similarity
-        {label_filter}
+        {where_clause}
         RETURN id(node) AS id, similarity AS score
         ORDER BY similarity DESC
         LIMIT $top_k
@@ -248,6 +307,7 @@ class MemgraphGraphStore(BaseGraphStore):
                 "k": overfetch_k,
                 "top_k": k,
                 "query_vector": query_vector,
+                "graph_name": filters.get("graph_name"),
             },
         )
 
@@ -260,14 +320,18 @@ class MemgraphGraphStore(BaseGraphStore):
         filters: Optional[dict] = None,
     ) -> list[dict]:
         formatted_query = _format_tantivy_query(query_text)
-        overfetch_k = max(k * 5, k) if label else k
-        label_filter = ""
+        filters = filters or {}
+        overfetch_k = max(k * 5, k) if label or filters.get("graph_name") else k
+        conditions: list[str] = []
         if label:
-            label_filter = f"WHERE node:{escape_cypher_identifier(label)}"
+            conditions.append(f"node:{escape_cypher_identifier(label)}")
+        if filters.get("graph_name") is not None:
+            conditions.append("node.graph_name = $graph_name")
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"""
         CALL text_search.search({cypher_string_literal(index_name)}, $query_text, $k)
         YIELD node, score
-        {label_filter}
+        {where_clause}
         RETURN id(node) AS id, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -279,6 +343,7 @@ class MemgraphGraphStore(BaseGraphStore):
                     "query_text": formatted_query,
                     "k": overfetch_k,
                     "top_k": k,
+                    "graph_name": filters.get("graph_name"),
                 },
             )
         except Exception as exc:
@@ -293,6 +358,7 @@ class MemgraphGraphStore(BaseGraphStore):
         retrieval_query: Optional[str] = None,
         query_params: Optional[dict] = None,
         mode: str = "local",
+        graph_name: str | None = None,
     ) -> list[dict]:
         from recon_graphrag.retrieval.memgraph.queries import (
             DEFAULT_DRIFT_RETRIEVAL_QUERY,
@@ -309,14 +375,50 @@ class MemgraphGraphStore(BaseGraphStore):
         UNWIND $matches AS match
         MATCH (node)
         WHERE id(node) = toInteger(match.id)
+          AND ($graph_name IS NULL OR node.graph_name = $graph_name)
         WITH node, match.score AS score
         {retrieval_query}
         """
-        parameters = {"matches": matches}
+        parameters = {"matches": matches, "graph_name": graph_name}
         if query_params:
             for key, value in query_params.items():
                 parameters.setdefault(key, value)
         return self.execute_query(query, parameters)
+
+    def vector_search_community_reports(
+        self,
+        query_vector: list[float],
+        graph_name: str,
+        top_k: int = 3,
+        level: int | None = None,
+    ) -> list[dict]:
+        """Search Memgraph report vectors with graph/level filtering."""
+        index_name = cypher_string_literal("community-report-embeddings")
+        query = f"""
+        CALL vector_search.search({index_name}, $candidate_k, $query_vector)
+        YIELD node AS c, similarity
+        WHERE c:Community
+          AND c.graph_name = $graph_name
+          AND ($level IS NULL OR c.level = $level)
+        RETURN c.id AS id,
+               c.level AS level,
+               c.report_text AS report_text,
+               coalesce(c.report_json, '') AS report_json,
+               c.rating AS rating,
+               similarity AS score
+        ORDER BY similarity DESC
+        LIMIT $top_k
+        """
+        return self.execute_query(
+            query,
+            {
+                "candidate_k": max(top_k * 5, top_k),
+                "top_k": top_k,
+                "query_vector": query_vector,
+                "graph_name": graph_name,
+                "level": level,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Communities
@@ -362,6 +464,82 @@ class MemgraphGraphStore(BaseGraphStore):
         """
         return self.execute_query(query, {"limit": limit})
 
+    def get_entities_needing_summary(
+        self, graph_name: str, limit: int = 500
+    ) -> list[dict]:
+        query = """
+        MATCH (e:__Entity__ {graph_name: $graph_name})
+        WHERE coalesce(e.description_summary_status, '') <> 'success'
+          AND size(coalesce(e.descriptions, [])) > 0
+        RETURN id(e) AS id,
+               e.id AS entity_id,
+               coalesce(e.name, e.title, e.id) AS name,
+               coalesce(e.type, last(labels(e))) AS type,
+               e.descriptions AS descriptions
+        LIMIT $limit
+        """
+        return self.execute_query(query, {"graph_name": graph_name, "limit": limit})
+
+    def get_relationships_needing_summary(
+        self, graph_name: str, limit: int = 500
+    ) -> list[dict]:
+        query = """
+        MATCH (source:__Entity__)-[r]->(target:__Entity__)
+        WHERE r.graph_name = $graph_name
+          AND coalesce(r.description_summary_status, '') <> 'success'
+          AND size(coalesce(r.descriptions, [])) > 0
+        RETURN id(r) AS id,
+               r.id AS rel_id,
+               coalesce(source.human_readable_id, source.canonical_key, source.id) AS source_id,
+               coalesce(target.human_readable_id, target.canonical_key, target.id) AS target_id,
+               type(r) AS type,
+               r.descriptions AS descriptions
+        LIMIT $limit
+        """
+        return self.execute_query(query, {"graph_name": graph_name, "limit": limit})
+
+    def persist_entity_summaries(
+        self, graph_name: str, summaries: list[dict]
+    ) -> None:
+        if not summaries:
+            return
+        query = """
+        UNWIND $summaries AS row
+        MATCH (e:__Entity__ {graph_name: $graph_name})
+        WHERE id(e) = row.id
+        SET e.descriptions = row.descriptions,
+            e.description_summary_status = row.description_summary_status,
+            e.description_input_fingerprint = row.description_input_fingerprint,
+            e.description_summary_updated = row.description_summary_updated,
+            e.description_summary_error = row.description_summary_error,
+            e.description = CASE
+                WHEN row.description IS NULL THEN e.description
+                ELSE row.description
+            END
+        """
+        self.execute_query(query, {"graph_name": graph_name, "summaries": summaries})
+
+    def persist_relationship_summaries(
+        self, graph_name: str, summaries: list[dict]
+    ) -> None:
+        if not summaries:
+            return
+        query = """
+        UNWIND $summaries AS row
+        MATCH ()-[r]->()
+        WHERE r.graph_name = $graph_name AND id(r) = row.id
+        SET r.descriptions = row.descriptions,
+            r.description_summary_status = row.description_summary_status,
+            r.description_input_fingerprint = row.description_input_fingerprint,
+            r.description_summary_updated = row.description_summary_updated,
+            r.description_summary_error = row.description_summary_error,
+            r.description = CASE
+                WHEN row.description IS NULL THEN r.description
+                ELSE row.description
+            END
+        """
+        self.execute_query(query, {"graph_name": graph_name, "summaries": summaries})
+
     def get_community_ranked_context(
         self,
         graph_name: str,
@@ -377,7 +555,7 @@ class MemgraphGraphStore(BaseGraphStore):
             {"graph_name": graph_name, "cid": community_id, "level": level},
         )
 
-    def get_community_child_summary_context(
+    def get_child_community_reports(
         self,
         graph_name: str,
         community_id: str,
@@ -385,11 +563,11 @@ class MemgraphGraphStore(BaseGraphStore):
         child_level: int,
     ) -> list[dict]:
         from recon_graphrag.retrieval.memgraph.queries import (
-            COMMUNITY_CHILD_SUMMARY_QUERY,
+            COMMUNITY_CHILD_REPORT_QUERY,
         )
 
         return self.execute_query(
-            COMMUNITY_CHILD_SUMMARY_QUERY,
+            COMMUNITY_CHILD_REPORT_QUERY,
             {
                 "graph_name": graph_name,
                 "cid": community_id,
@@ -398,33 +576,19 @@ class MemgraphGraphStore(BaseGraphStore):
             },
         )
 
-    def get_community_summaries_by_keys(
+    def get_community_reports_by_keys(
         self,
         graph_name: str,
         keys: list[dict],
         top_k: int,
     ) -> list[dict]:
         from recon_graphrag.retrieval.memgraph.queries import (
-            DRIFT_COMMUNITY_SUMMARIES_QUERY,
+            COMMUNITY_REPORTS_BY_KEY_QUERY,
         )
 
         return self.execute_query(
-            DRIFT_COMMUNITY_SUMMARIES_QUERY,
+            COMMUNITY_REPORTS_BY_KEY_QUERY,
             {"keys": keys, "graph_name": graph_name, "top_k": top_k},
-        )
-
-    def get_community_entities_by_keys(
-        self,
-        graph_name: str,
-        keys: list[dict],
-    ) -> list[dict]:
-        from recon_graphrag.retrieval.memgraph.queries import (
-            DRIFT_COMMUNITY_ENTITIES_QUERY,
-        )
-
-        return self.execute_query(
-            DRIFT_COMMUNITY_ENTITIES_QUERY,
-            {"keys": keys, "graph_name": graph_name},
         )
 
     # ------------------------------------------------------------------
@@ -438,8 +602,9 @@ class MemgraphGraphStore(BaseGraphStore):
     def _extra_validation_count_queries(self) -> dict[str, str]:
         return {
             "community_count": "MATCH (c:Community) RETURN count(c) AS cnt",
-            "community_summary_count": (
-                "MATCH (c:Community) WHERE c.summary IS NOT NULL "
+            "community_report_count": (
+                "MATCH (c:Community) "
+                "WHERE c.report_text IS NOT NULL "
                 "RETURN count(c) AS cnt"
             ),
             "entity_self_loop_count": (

@@ -169,6 +169,64 @@ Release Please uses these signals to determine that the next release should be a
 4. Respond to review feedback promptly and respectfully.
 5. Do not bump the version in `pyproject.toml` or `recon_graphrag/__init__.py` — versioning is handled automatically by Release Please.
 
+## Interface conventions: ABC vs Protocol
+
+The project uses both `ABC` and `Protocol` intentionally. Follow this contract:
+
+### Decision rule
+
+| Question | Answer | Use |
+|---|---|---|
+| Does the base class provide shared implementation? | Yes | `ABC` |
+| Is it only a shape/contract with no shared code? | Yes | `Protocol` |
+| Is this a plugin interface for external users? | Yes | `Protocol` |
+| Is this an internal base class with a template method pattern? | Yes | `ABC` |
+
+### Examples
+
+**`Protocol`** — the user brings their own implementation, no inheritance needed:
+
+```python
+@runtime_checkable
+class BaseLLM(Protocol):
+    def invoke(self, prompt: str, **kwargs) -> LLMResponse: ...
+    async def ainvoke(self, prompt: str, **kwargs) -> LLMResponse: ...
+```
+
+**`ABC`** — subclasses inherit shared logic and override abstract methods:
+
+```python
+class BaseGraphWriter(ABC):
+    def write_graph_document(self, graph_document):  # shared logic
+        self._write_documents(...)
+        ...
+
+    @abstractmethod
+    def _write_documents(self, documents):  # backend-specific
+        ...
+```
+
+### Current inventory
+
+| Class | Style | Reason |
+|---|---|---|
+| `GraphStore` | `Protocol` | Plugin interface, ~30 methods, no shared code |
+| `GraphWriter` | `Protocol` | Narrow writer-only contract |
+| `BaseLLM` | `Protocol` | Plugin interface, no shared code |
+| `BaseEmbedder` | `Protocol` | Plugin interface, no shared code |
+| `TokenCounter` | `Protocol` | Utility contract, no shared code |
+| `BaseGraphWriter` | `ABC` | Template method with 50+ lines of shared row preparation |
+| `BaseEntityResolver` | `ABC` | Template method with shared resolution/fuzzy/LLM logic |
+| `BaseRetriever` | `Protocol` | Single abstract method, no shared code |
+
+### Rules
+
+1. **Do not mix styles for the same role.** If a class is `Protocol`, keep it `Protocol`. If `ABC`, keep it `ABC`.
+2. **Do not duplicate protocol definitions.** Import from the canonical location. (e.g., `TokenCounter` lives in `utils/tokens.py`, not in `extraction/chunking.py`.)
+3. **New external-facing plugin interfaces** → `Protocol`.
+4. **New internal base classes with shared logic** → `ABC`.
+5. **When in doubt**, start with `Protocol`. Only switch to `ABC` if you need shared implementation.
+
 ## Code of conduct
 
 Be respectful, inclusive, and constructive. Harassment or discriminatory behavior will not be tolerated.

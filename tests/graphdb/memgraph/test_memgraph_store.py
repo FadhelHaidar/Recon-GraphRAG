@@ -84,7 +84,7 @@ def test_execute_query_translates_result(store, fake_driver):
 
 
 @pytest.mark.asyncio
-async def test_resolve_entities_forwards_full_advanced_parameter_set(
+async def test_resolve_entities_hybrid_forwards_full_advanced_parameter_set(
     store, monkeypatch
 ):
     captured = {}
@@ -93,9 +93,9 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
         def __init__(self, graph_store):
             captured["graph_store"] = graph_store
 
-        async def resolve(self, **kwargs):
+        async def resolve_hybrid(self, **kwargs):
             captured["kwargs"] = kwargs
-            return {"strategy": kwargs["strategy"]}
+            return {"strategy": "hybrid"}
 
     monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
     embedder = object()
@@ -104,9 +104,8 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
     context_properties = {"Person": ["description", "birth_date"]}
     conflict_properties = {"Movie": ["year"]}
 
-    result = await store.resolve_entities(
+    result = await store.resolve_entities_hybrid(
         graph_name="movie-graph",
-        strategy="hybrid",
         resolve_property="title",
         dry_run=True,
         merge_threshold=91.0,
@@ -126,7 +125,6 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
     assert captured["graph_store"] is store
     assert captured["kwargs"] == {
         "graph_name": "movie-graph",
-        "strategy": "hybrid",
         "resolve_property": "title",
         "dry_run": True,
         "merge_threshold": 91.0,
@@ -140,6 +138,99 @@ async def test_resolve_entities_forwards_full_advanced_parameter_set(
         "context_properties": context_properties,
         "conflict_properties": conflict_properties,
         "context_mode": "config_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_exact_forwards_basic_parameters(store, monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_exact(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "exact"}
+
+    monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
+
+    result = await store.resolve_entities_exact(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+    )
+
+    assert result == {"strategy": "exact"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_normalized_forwards_basic_parameters(store, monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_normalized(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "normalized"}
+
+    monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
+
+    result = await store.resolve_entities_normalized(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+    )
+
+    assert result == {"strategy": "normalized"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_entities_fuzzy_forwards_fuzzy_parameters(store, monkeypatch):
+    captured = {}
+
+    class CapturingResolver:
+        def __init__(self, graph_store):
+            captured["graph_store"] = graph_store
+
+        async def resolve_fuzzy(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"strategy": "fuzzy"}
+
+    monkeypatch.setattr(entity_resolution, "_MemgraphEntityResolver", CapturingResolver)
+
+    result = await store.resolve_entities_fuzzy(
+        graph_name="movie-graph",
+        resolve_property="title",
+        dry_run=True,
+        merge_threshold=91.0,
+        review_threshold=72.0,
+        max_candidates_per_entity=7,
+    )
+
+    assert result == {"strategy": "fuzzy"}
+    assert captured["graph_store"] is store
+    assert captured["kwargs"] == {
+        "graph_name": "movie-graph",
+        "resolve_property": "title",
+        "dry_run": True,
+        "merge_threshold": 91.0,
+        "review_threshold": 72.0,
+        "max_candidates_per_entity": 7,
     }
 
 
@@ -238,6 +329,17 @@ def test_vector_search_runs_vector_procedure(store, fake_driver):
     assert result == [{"id": 1, "score": 0.9}, {"id": 2, "score": 0.8}]
     query_text = fake_driver.session_obj.queries[-1]
     assert "vector_search.search" in query_text
+
+
+def test_community_report_vector_search_uses_memgraph_procedure(store, fake_driver):
+    store.vector_search_community_reports([0.1, 0.2], "graph-a", top_k=3, level=0)
+
+    query = fake_driver.session_obj.queries[-1]
+    params = fake_driver.session_obj.params[-1]
+    assert "vector_search.search" in query
+    assert "c.graph_name = $graph_name" in query
+    assert params["candidate_k"] == 15
+    assert params["level"] == 0
 
 
 def test_vector_search_overfetches_when_label_filtering(store, fake_driver):
@@ -416,10 +518,10 @@ def test_validate_graph_build_runs_counts(store, fake_driver):
             return FakeResult([{"cnt": 3}])
         if "MATCH (:__Entity__)-[r]-(:__Entity__)" in query:
             return FakeResult([{"cnt": 2}])
-        if "MATCH (c:Community)" in query and "summary" not in query:
-            return FakeResult([{"cnt": 7}])
-        if "MATCH (c:Community)" in query and "summary" in query:
+        if "MATCH (c:Community)" in query and "report_text" in query:
             return FakeResult([{"cnt": 6}])
+        if "MATCH (c:Community)" in query:
+            return FakeResult([{"cnt": 7}])
         if "MATCH (e:__Entity__)-[r]-(e)" in query:
             return FakeResult([{"cnt": 0}])
         return FakeResult([])
@@ -437,7 +539,7 @@ def test_validate_graph_build_runs_counts(store, fake_driver):
     assert result["evidence_link_count"] == 3
     assert result["entity_relationship_count"] == 2
     assert result["community_count"] == 7
-    assert result["community_summary_count"] == 6
+    assert result["community_report_count"] == 6
     assert result["entity_self_loop_count"] == 0
 
 
@@ -447,7 +549,6 @@ def test_create_indexes_runs_uid_constraint(store, fake_driver):
     store.create_indexes(embedding_dim=1536)
 
     query_text = "\n".join(fake_driver.session_obj.queries)
-    assert "CREATE VECTOR INDEX `chunk-embeddings`" in query_text
     assert "CREATE VECTOR INDEX `entity-embeddings`" in query_text
     assert "CREATE TEXT INDEX `entity-names`" in query_text
     assert "CREATE CONSTRAINT" in query_text

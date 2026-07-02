@@ -57,10 +57,39 @@ class GraphStore(Protocol):
     # ------------------------------------------------------------------
     # Entity resolution
     # ------------------------------------------------------------------
-    async def resolve_entities(
+    async def resolve_entities_exact(
         self,
         graph_name: str = "entity-graph",
-        strategy: str = "normalized",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        """Merge duplicate entity nodes using exact matching."""
+        ...
+
+    async def resolve_entities_normalized(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+    ) -> dict:
+        """Merge duplicate entity nodes using normalized matching."""
+        ...
+
+    async def resolve_entities_fuzzy(
+        self,
+        graph_name: str = "entity-graph",
+        resolve_property: str = "name",
+        dry_run: bool = False,
+        merge_threshold: float = 95.0,
+        review_threshold: float = 85.0,
+        max_candidates_per_entity: int = 20,
+    ) -> dict:
+        """Merge duplicate entity nodes using fuzzy string matching."""
+        ...
+
+    async def resolve_entities_hybrid(
+        self,
+        graph_name: str = "entity-graph",
         resolve_property: str = "name",
         dry_run: bool = False,
         merge_threshold: float = 95.0,
@@ -75,7 +104,7 @@ class GraphStore(Protocol):
         conflict_properties: Optional[dict[str, list[str]] | list[str]] = None,
         context_mode: str = "safe_defaults",
     ) -> dict:
-        """Merge duplicate entity nodes when possible."""
+        """Merge duplicate entity nodes using hybrid fuzzy + embedding + LLM matching."""
         ...
 
     # ------------------------------------------------------------------
@@ -113,6 +142,30 @@ class GraphStore(Protocol):
         """Batch upsert vector embeddings onto nodes by internal ID."""
         ...
 
+    def get_entities_needing_summary(
+        self, graph_name: str, limit: int = 500
+    ) -> list[dict]:
+        """Fetch entity rows whose raw descriptions need summarization."""
+        ...
+
+    def get_relationships_needing_summary(
+        self, graph_name: str, limit: int = 500
+    ) -> list[dict]:
+        """Fetch relationship rows whose raw descriptions need summarization."""
+        ...
+
+    def persist_entity_summaries(
+        self, graph_name: str, summaries: list[dict]
+    ) -> None:
+        """Persist entity summary text and metadata by internal ID."""
+        ...
+
+    def persist_relationship_summaries(
+        self, graph_name: str, summaries: list[dict]
+    ) -> None:
+        """Persist relationship summary text and metadata by internal ID."""
+        ...
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
@@ -144,6 +197,7 @@ class GraphStore(Protocol):
         retrieval_query: Optional[str] = None,
         query_params: Optional[dict] = None,
         mode: str = "local",
+        graph_name: str | None = None,
     ) -> list[dict]:
         """Fetch formatted entity context for ranked entity matches."""
         ...
@@ -183,22 +237,12 @@ class GraphStore(Protocol):
         """Get community statistics."""
         ...
 
-    def store_community_summary(
-        self,
-        community_id: str,
-        level: int,
-        summary: str,
-        graph_name: str,
-    ) -> None:
-        """Store a generated summary on a community node."""
-        ...
-
     def store_community_report(
         self,
         report: CommunityReport,
         graph_name: str,
     ) -> None:
-        """Store a structured community report and compatibility summary."""
+        """Store a structured community report."""
         ...
 
     def mark_community_report_failed(
@@ -229,14 +273,14 @@ class GraphStore(Protocol):
         """
         ...
 
-    def get_community_child_summary_context(
+    def get_child_community_reports(
         self,
         graph_name: str,
         community_id: str,
         level: int,
         child_level: int,
     ) -> list[dict]:
-        """Fetch child community summaries for a parent community."""
+        """Fetch child reports for a parent community."""
         ...
 
     def get_claims_for_entities(
@@ -247,7 +291,7 @@ class GraphStore(Protocol):
         """Fetch claims linked to the given entity IDs.
 
         Returns rows with keys: claim_id, entity_id, claim_type, description,
-        status, chunk_id.
+        status, object_entity_id, source_text, text_unit_id, chunk_id.
         """
         ...
 
@@ -263,21 +307,51 @@ class GraphStore(Protocol):
         """
         ...
 
-    def get_community_summaries_by_keys(
+    def get_community_reports_by_keys(
         self,
         graph_name: str,
         keys: list[dict],
         top_k: int,
     ) -> list[dict]:
-        """Fetch community summaries for graph-scoped community keys."""
+        """Fetch reports for graph-scoped community keys."""
         ...
 
-    def get_community_entities_by_keys(
+    # ------------------------------------------------------------------
+    # Community report embeddings
+    # ------------------------------------------------------------------
+    def get_unembedded_community_reports(
         self,
         graph_name: str,
-        keys: list[dict],
+        limit: int = 500,
     ) -> list[dict]:
-        """Fetch entities and relationships for graph-scoped community keys."""
+        """Get community reports without embeddings.
+
+        Returns rows with keys: id, level, report_text, title.
+        """
+        ...
+
+    def upsert_community_report_vectors(
+        self,
+        node_ids: list[str],
+        vectors: list[list[float]],
+        graph_name: str,
+        levels: list[int],
+    ) -> None:
+        """Batch upsert vector embeddings onto community report nodes."""
+        ...
+
+    def vector_search_community_reports(
+        self,
+        query_vector: list[float],
+        graph_name: str,
+        top_k: int = 3,
+        level: int | None = None,
+    ) -> list[dict]:
+        """Vector search over community report embeddings.
+
+        Returns rows with keys: id, level, report_text,
+        report_json, rating, score.
+        """
         ...
 
     # ------------------------------------------------------------------

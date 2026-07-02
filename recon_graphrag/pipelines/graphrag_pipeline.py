@@ -21,6 +21,7 @@ from recon_graphrag.extraction.chunking import (
     _page_text,
 )
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
+from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
 from recon_graphrag.extraction.schema import GraphSchema
 from recon_graphrag.extraction.assembler import GraphDocumentAssembler
 from recon_graphrag.extraction.validator import SchemaValidator
@@ -42,7 +43,8 @@ class GraphBuilderPipeline:
         graph_name: str = "entity-graph",
         graph_writer: Optional[GraphWriter] = None,
         extraction_concurrency: int = 5,
-        max_gleanings: int = 0,
+        document_concurrency: int = 1,
+        max_gleanings: int = 1,
         extract_claims: bool = False,
         perform_entity_resolution: bool = True,
         entity_resolution_strategy: str = "normalized",
@@ -57,6 +59,9 @@ class GraphBuilderPipeline:
         entity_resolution_context_mode: str = "safe_defaults",
         allow_ai_auto_merge: bool = False,
         embed_entities: bool = True,
+        summarize_descriptions: bool = True,
+        summarization_concurrency: int = 5,
+        summarization_limit: int = 500,
         fail_on_resolution_error: bool = False,
         fail_on_embedding_error: bool = False,
     ):
@@ -66,6 +71,7 @@ class GraphBuilderPipeline:
         self.schema = schema
         self.graph_name = graph_name
         self.extraction_concurrency = extraction_concurrency
+        self.document_concurrency = max(int(document_concurrency), 1)
         self.max_gleanings = max_gleanings
         self.extract_claims = extract_claims
         self.perform_entity_resolution = perform_entity_resolution
@@ -81,6 +87,9 @@ class GraphBuilderPipeline:
         self.entity_resolution_context_mode = entity_resolution_context_mode
         self.allow_ai_auto_merge = allow_ai_auto_merge
         self.embed_entity_nodes = embed_entities
+        self.summarize_descriptions = summarize_descriptions
+        self.summarization_concurrency = summarization_concurrency
+        self.summarization_limit = summarization_limit
         self.fail_on_resolution_error = fail_on_resolution_error
         self.fail_on_embedding_error = fail_on_embedding_error
 
@@ -94,15 +103,15 @@ class GraphBuilderPipeline:
         text: str,
         metadata: Optional[dict] = None,
         *,
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
-        chunk_unit: str = "characters",
+        chunk_size: int = 1200,
+        chunk_overlap: int = 100,
+        chunk_unit: str = "tokens",
         token_counter: TokenCounter | None = None,
         token_encoding: str = "cl100k_base",
     ) -> dict:
         """Build knowledge graph from raw text.
 
-        Uses internal character-level chunking and extraction, then automatically:
+        Uses internal token-based chunking and extraction, then automatically:
           - Step 2: Entity resolution (merge duplicates)
           - Step 3: Entity embedding (for local/DRIFT search)
 
@@ -140,9 +149,9 @@ class GraphBuilderPipeline:
         self,
         documents: list[dict],
         *,
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
-        chunk_unit: str = "characters",
+        chunk_size: int = 1200,
+        chunk_overlap: int = 100,
+        chunk_unit: str = "tokens",
         token_counter: TokenCounter | None = None,
         token_encoding: str = "cl100k_base",
         window_size: int = 2,
@@ -160,28 +169,32 @@ class GraphBuilderPipeline:
         """
         self._validate_document_envelopes(documents)
 
-        results = []
-        for envelope in documents:
-            metadata = envelope.get("metadata") or {}
-            if "text" in envelope:
-                result = await self.build_from_text(
-                    text=envelope["text"],
-                    metadata=metadata,
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                    chunk_unit=chunk_unit,
-                    token_counter=token_counter,
-                    token_encoding=token_encoding,
-                )
-            else:
-                result = await self._build_from_pages_envelope(
+        semaphore = asyncio.Semaphore(self.document_concurrency)
+
+        async def _build_one(envelope: dict) -> dict:
+            async with semaphore:
+                metadata = envelope.get("metadata") or {}
+                if "text" in envelope:
+                    return await self.build_from_text(
+                        text=envelope["text"],
+                        metadata=metadata,
+                        chunk_size=chunk_size,
+                        chunk_overlap=chunk_overlap,
+                        chunk_unit=chunk_unit,
+                        token_counter=token_counter,
+                        token_encoding=token_encoding,
+                    )
+                return await self._build_from_pages_envelope(
                     pages=envelope["pages"],
                     metadata=metadata,
                     window_size=window_size,
                     window_overlap=window_overlap,
                 )
-            results.append(result)
-        return results
+
+        tasks = [
+            asyncio.create_task(_build_one(envelope)) for envelope in documents
+        ]
+        return await asyncio.gather(*tasks)
 
     async def _build_from_pages_envelope(
         self,
@@ -291,6 +304,12 @@ class GraphBuilderPipeline:
             print("Resolving duplicate entities")
             await self._resolve_entities()
 
+        if self.summarize_descriptions:
+            print("Summarizing entity descriptions")
+            await self._summarize_entity_descriptions()
+            print("Summarizing relationship descriptions")
+            await self._summarize_relationship_descriptions()
+
         if self.embed_entity_nodes:
             print("Embedding entity nodes")
             await self._embed_entities()
@@ -347,6 +366,7 @@ class GraphBuilderPipeline:
                             claims = await self.extractor.extract_claims(
                                 text=chunk.text,
                                 entity_ids=entity_ids,
+                                text_unit_id=chunk.id,
                             )
                             print(
                                 f"  [{i}/{total}] Claims chunk {chunk.id}: "
@@ -425,30 +445,33 @@ class GraphBuilderPipeline:
     async def _resolve_entities(self):
         """Step 2: Merge duplicate entities with the internal resolver."""
         try:
-            kwargs = {
-                "graph_name": self.graph_name,
-                "strategy": self.entity_resolution_strategy,
-            }
-            if self.entity_resolution_strategy == "hybrid":
-                kwargs.update(
-                    {
-                        "embedder": self.embedder,
-                        "llm": self.llm,
-                        "aliases": self.entity_resolution_aliases,
-                        "llm_guidance": self.entity_resolution_llm_guidance,
-                        "allow_ai_auto_merge": self.allow_ai_auto_merge,
-                        "context_properties": (
-                            self.entity_resolution_context_properties
-                        ),
-                        "conflict_properties": (
-                            self.entity_resolution_conflict_properties
-                        ),
-                        "context_mode": self.entity_resolution_context_mode,
-                    }
+            strategy = self.entity_resolution_strategy
+            if strategy == "exact":
+                result = await self.graph_store.resolve_entities_exact(
+                    graph_name=self.graph_name,
                 )
-            result = await self.graph_store.resolve_entities(
-                **kwargs,
-            )
+            elif strategy == "normalized":
+                result = await self.graph_store.resolve_entities_normalized(
+                    graph_name=self.graph_name,
+                )
+            elif strategy == "fuzzy":
+                result = await self.graph_store.resolve_entities_fuzzy(
+                    graph_name=self.graph_name,
+                )
+            elif strategy == "hybrid":
+                result = await self.graph_store.resolve_entities_hybrid(
+                    graph_name=self.graph_name,
+                    embedder=self.embedder,
+                    llm=self.llm,
+                    aliases=self.entity_resolution_aliases,
+                    llm_guidance=self.entity_resolution_llm_guidance,
+                    allow_ai_auto_merge=self.allow_ai_auto_merge,
+                    context_properties=self.entity_resolution_context_properties,
+                    conflict_properties=self.entity_resolution_conflict_properties,
+                    context_mode=self.entity_resolution_context_mode,
+                )
+            else:
+                raise ValueError(f"Unknown entity resolution strategy: {strategy}")
             if isinstance(result, dict) and result.get("skipped"):
                 print(f"Entity resolution skipped: reason={result.get('reason')}")
         except Exception as e:
@@ -465,6 +488,24 @@ class GraphBuilderPipeline:
             print(f"Entity embedding failed: {e}")
             if self.fail_on_embedding_error:
                 raise
+
+    async def _summarize_entity_descriptions(self) -> None:
+        summarizer = DescriptionSummarizer(
+            self.llm,
+            self.graph_store,
+            self.graph_name,
+            concurrency=self.summarization_concurrency,
+        )
+        await summarizer.summarize_entities(limit=self.summarization_limit)
+
+    async def _summarize_relationship_descriptions(self) -> None:
+        summarizer = DescriptionSummarizer(
+            self.llm,
+            self.graph_store,
+            self.graph_name,
+            concurrency=self.summarization_concurrency,
+        )
+        await summarizer.summarize_relationships(limit=self.summarization_limit)
 
     def _validate_graph_build(self) -> dict:
         return self.graph_store.validate_graph_build()

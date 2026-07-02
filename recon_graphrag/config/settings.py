@@ -12,8 +12,10 @@ class PipelineConfig:
     """Configuration for GraphBuilderPipeline.
 
     Attributes:
-        chunk_size: Character-level chunk size for text splitting.
+        chunk_size: Chunk size for text splitting. Interpreted as tokens by
+            default (see ``chunk_unit``).
         chunk_overlap: Overlap between consecutive chunks.
+        chunk_unit: ``"tokens"`` (default) or ``"characters"``.
         embedding_dim: Vector embedding dimension. Auto-detected for
             sentence-transformers; defaults to 1536 (OpenAI) if not specified.
         extraction_concurrency: Maximum number of chunks to extract concurrently.
@@ -22,12 +24,14 @@ class PipelineConfig:
             When absent, callers fall back to ``ApproximateTokenCounter``.
     """
 
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
+    chunk_size: int = 1200
+    chunk_overlap: int = 100
+    chunk_unit: str = "tokens"
     embedding_dim: int | None = None
     extraction_concurrency: int = 5
-    max_gleanings: int = 0
+    max_gleanings: int = 1
     extract_claims: bool = False
+    use_mixed_context: bool = False
     token_counter: TokenCounter | None = None
 
     def __post_init__(self):
