@@ -318,14 +318,25 @@ def _format_entity_context(
 
         section = f"Finding: {content.get('title', 'Unknown')}"
         relationships = content.get("relationships", [])
-        if top_k_relationships is not None:
+        if top_k_relationships is not None and len(relationships) > top_k_relationships:
+            # relationship_records is parallel to relationships; rank by weight
+            # so truncation keeps the strongest connections, not collect() order.
+            records = content.get("relationship_records", [])
+            if len(records) == len(relationships):
+                order = sorted(
+                    range(len(records)),
+                    key=lambda i: -float(records[i].get("weight", 1.0) or 1.0),
+                )
+                relationships = [relationships[i] for i in order]
             relationships = relationships[:top_k_relationships]
         if relationships:
             section += block("Connections", relationships)
         sources = content.get("source_text", [])
         if sources:
             section += block("Evidence", sources[:source_limit])
-        if citation_lines:
-            section += block("Citation metadata", citation_lines)
         parts.append(section)
+    if parts and citation_lines:
+        parts.append(
+            block("Citation metadata", citation_lines).lstrip("\n")
+        )
     return item_separator.join(parts)

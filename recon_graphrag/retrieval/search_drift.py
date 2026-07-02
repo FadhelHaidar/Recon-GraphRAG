@@ -22,6 +22,7 @@ import logging
 import random as _random
 import re
 import time
+import zlib
 from typing import Optional
 
 from recon_graphrag.embeddings.base import BaseEmbedder
@@ -430,7 +431,8 @@ class DriftSearchRetriever:
         primer_top_k: int,
     ) -> list[dict]:
         """Generate hypothetical answer, re-embed, re-search reports."""
-        rng = _random.Random(hash(query))
+        # hash() is salted per process; crc32 keeps template choice reproducible.
+        rng = _random.Random(zlib.crc32(query.encode("utf-8")))
         template = rng.choice(reports)
         template_text = template.get("report_text", "")
 
@@ -679,26 +681,17 @@ class DriftSearchRetriever:
             return
 
         # Build context
+        chunk_ids = _source_chunk_ids_from_result(retriever_result)
+        if chunk_ids:
+            try:
+                action.citations = resolve_chunk_citations(
+                    self.graph_store, self.graph_name, chunk_ids
+                )
+            except Exception:
+                pass
         if config.action_use_mixed_context:
             local_context = self._build_action_mixed_context(retriever_result)
-            chunk_ids = _source_chunk_ids_from_result(retriever_result)
-            if chunk_ids:
-                try:
-                    action.citations = resolve_chunk_citations(
-                        self.graph_store, self.graph_name, chunk_ids
-                    )
-                except Exception:
-                    pass
         else:
-            chunk_ids = _source_chunk_ids_from_result(retriever_result)
-            if chunk_ids:
-                try:
-                    action.citations = resolve_chunk_citations(
-                        self.graph_store, self.graph_name, chunk_ids
-                    )
-                except Exception:
-                    pass
-
             from recon_graphrag.retrieval.search_local import _format_entity_context
 
             local_context = _format_entity_context(
