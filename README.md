@@ -1,16 +1,56 @@
 # Recon-GraphRAG
 
-Domain-agnostic GraphRAG SDK for Neo4j and Memgraph, with a pluggable graph-store backend and the [Microsoft GraphRAG](https://microsoft.github.io/graphrag/) philosophy.
+[![CI](https://github.com/FadhelHaidar/Recon-GraphRAG/actions/workflows/ci.yml/badge.svg)](https://github.com/FadhelHaidar/Recon-GraphRAG/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/FadhelHaidar/Recon-GraphRAG)](https://github.com/FadhelHaidar/Recon-GraphRAG/releases)
 
-Like Microsoft GraphRAG, Recon-GraphRAG uses **community detection with multi-level hierarchical communities** to structure knowledge graphs, and provides the same three search paradigms — **Local**, **Global**, and **DRIFT** search — to answer questions at different levels of specificity.
+Domain-agnostic GraphRAG SDK for Neo4j and Memgraph, with a pluggable graph-store backend and the [Microsoft GraphRAG](https://microsoft.github.io/graphrag/) philosophy.
 
 > **Work in Progress** — This project is under active development and is not yet reliable for production use. APIs may change without notice, and features may be incomplete or unstable.
 
-## What is Recon-GraphRAG?
+## Table of Contents
 
-Recon-GraphRAG is a Python library for building knowledge graphs from unstructured text and querying them with retrieval-augmented generation. It extracts entities and relationships with an LLM, resolves duplicates, detects hierarchical communities, and supports semantic search over entities, chunks, and community summaries.
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Supported Providers](#supported-providers)
+- [Documentation](#documentation)
+- [Example](#example)
+- [Acknowledgments](#acknowledgments)
+- [Contributing](#contributing)
+- [Changelog](#changelog)
+- [License](#license)
 
-Learn more about the two-stage pipeline in [docs/05-pipelines.md](docs/05-pipelines.md).
+## Key Features
+
+- 🔌 **Pluggable graph backends** — Swap between Neo4j and Memgraph via the `GraphStore` protocol
+- 🧠 **Hierarchical community detection** — Multi-level Leiden communities with LLM-generated summaries
+- 🔍 **Three search paradigms** — Local, Global, and DRIFT search for different levels of specificity
+- 📐 **Schema-driven extraction** — Define typed nodes, relationships, and patterns before building
+- 🔗 **Hybrid entity resolution** — Fuzzy matching with LLM-based rescue for robust deduplication
+- 🏗️ **Composable building blocks** — Use high-level pipelines or individual workflow steps
+- 🤖 **Multiple LLM providers** — OpenAI, Anthropic, Ollama, OpenRouter, and any OpenAI-compatible endpoint
+- 📊 **Citations with source metadata** — Every answer includes traceable source references
+
+## Architecture
+
+Recon-GraphRAG follows the two-stage approach popularized by [Microsoft GraphRAG](https://microsoft.github.io/graphrag/): first build a structured knowledge graph with hierarchical community summaries, then query it with retrieval-augmented generation.
+
+```mermaid
+graph LR
+    A[Unstructured Text] --> B[Entity & Relationship Extraction]
+    B --> C[Duplicate Resolution]
+    C --> D[Graph Construction]
+    D --> E[Community Detection<br/>Leiden — Hierarchical]
+    E --> F[Community Summarization]
+    F --> G{Search Mode}
+    G --> H[Local Search]
+    G --> I[Global Search]
+    G --> J[DRIFT Search]
+```
 
 ## Requirements
 
@@ -61,7 +101,7 @@ uv sync
 
 See [docs/01-installation.md](docs/01-installation.md) for more install options (`pip`, editable install, clone-without-install, extras, version pinning, troubleshooting).
 
-## Quick start
+## Quick Start
 
 ```python
 from neo4j import GraphDatabase
@@ -138,6 +178,16 @@ for citation in result.citations:
 
 For a step-by-step walkthrough, see [docs/02-quickstart.md](docs/02-quickstart.md).
 
+## Supported Providers
+
+| Provider | LLM | Embeddings | Notes |
+|---|---|---|---|
+| OpenAI | ✅ | ✅ | Default, recommended |
+| Anthropic | ✅ | — | `pip install recon-graphrag[anthropic]` |
+| Ollama | ✅ | ✅ | `pip install recon-graphrag[ollama]` |
+| Sentence Transformers | — | ✅ | Local embeddings, no API key needed |
+| OpenRouter | ✅ | — | Via OpenAI-compatible interface |
+
 ## Documentation
 
 | Document | Description |
@@ -167,6 +217,20 @@ python search.py --backend memgraph
 ```
 
 See [docs/07-example.md](docs/07-example.md) for a full walkthrough.
+
+### Sample Output
+
+**Question:** *"What are the key relationships between directors and genres?"*
+
+**Answer:** Based on the knowledge graph, Christopher Nolan has a strong association with the sci-fi and thriller genres through films like *Inception* (2010) and *Interstellar* (2014)...
+
+**Citations:**
+- `record_42` — entity: Christopher Nolan, confidence: 0.95
+- `record_87` — relationship: DIRECTED → Inception
+
+## Acknowledgments
+
+This project is built on the knowledge graph retrieval methodology pioneered by [Microsoft GraphRAG](https://microsoft.github.io/graphrag/). It also relies on [Neo4j](https://neo4j.com/), [Memgraph](https://memgraph.com/), and the broader open source ecosystem for graph databases, LLMs, and embeddings.
 
 ## Contributing
 
