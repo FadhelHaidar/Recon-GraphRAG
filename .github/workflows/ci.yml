@@ -64,7 +64,7 @@ jobs:
           twine check dist/*
 
   release-please:
-    if: github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,7 +87,7 @@ jobs:
 
   publish-artifacts:
     needs: release-please
-    if: needs.release-please.outputs.release_created
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
