@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.0...v0.7.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **ci:** enforce owner approval with a status check ([#67](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/67)) ([401ded7](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/401ded7d64350e35cf02a62ebc7cc93476a338f6))
+
 ## [0.7.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.6.2...v0.7.0) (2026-07-02)
 
 
