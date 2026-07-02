@@ -38,36 +38,12 @@ class FakeGraphStore:
     def backfill_descriptions(self):
         pass
 
-    async def resolve_entities_exact(self, **kwargs):
-        self.resolve_kwargs = {"strategy": "exact", **kwargs}
-        return {"skipped": False, "merged_groups": 0, "strategy": "exact"}
-
-    async def resolve_entities_normalized(self, **kwargs):
-        self.resolve_kwargs = {"strategy": "normalized", **kwargs}
-        return {"skipped": False, "merged_groups": 0, "strategy": "normalized"}
-
-    async def resolve_entities_fuzzy(self, **kwargs):
-        self.resolve_kwargs = {"strategy": "fuzzy", **kwargs}
-        return {"skipped": False, "merged_groups": 0, "strategy": "fuzzy"}
-
-    async def resolve_entities_hybrid(self, **kwargs):
-        self.resolve_kwargs = {"strategy": "hybrid", **kwargs}
-        return {"skipped": False, "merged_groups": 0, "strategy": "hybrid"}
+    async def resolve_entities(self, **kwargs):
+        self.resolve_kwargs = kwargs
+        return {"skipped": False, "merged_groups": 0}
 
     def get_unembedded_entities(self, limit=500):
         return []
-
-    def get_entities_needing_summary(self, graph_name, limit=500):
-        return []
-
-    def get_relationships_needing_summary(self, graph_name, limit=500):
-        return []
-
-    def persist_entity_summaries(self, graph_name, summaries):
-        pass
-
-    def persist_relationship_summaries(self, graph_name, summaries):
-        pass
 
     def upsert_vectors(self, ids, property_name, vectors):
         pass
@@ -522,8 +498,8 @@ async def test_hybrid_entity_resolution_forwards_llm_and_embedder(movie_schema):
     await pipeline._resolve_entities()
 
     assert store.resolve_kwargs == {
-        "strategy": "hybrid",
         "graph_name": "entity-graph",
+        "strategy": "hybrid",
         "embedder": embedder,
         "llm": llm,
         "aliases": aliases,
@@ -547,7 +523,6 @@ async def test_extract_chunks_concurrently(
         schema=movie_schema,
         graph_writer=fake_writer,
         extraction_concurrency=3,
-        max_gleanings=0,
         perform_entity_resolution=False,
         embed_entities=False,
     )
@@ -639,7 +614,6 @@ async def test_partial_extraction_failure_continues(
         schema=movie_schema,
         graph_writer=fake_writer,
         extraction_concurrency=3,
-        max_gleanings=0,
         perform_entity_resolution=False,
         embed_entities=False,
     )
@@ -654,7 +628,6 @@ async def test_partial_extraction_failure_continues(
         metadata={"source": "test"},
         chunk_size=15,
         chunk_overlap=5,
-        chunk_unit="characters",
     )
 
     assert result["extraction"]["chunks"] == expected_chunks

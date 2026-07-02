@@ -3,9 +3,9 @@
 Run this after both databases have been built from the same movie corpus.
 
 Usage:
-  python examples/advanced/compare_backends.py --limit 5
-  python examples/advanced/compare_backends.py --modes local drift
-  python examples/advanced/compare_backends.py --dedup-strategy normalized
+  python compare_backends.py --limit 5
+  python compare_backends.py --modes local drift
+  python compare_backends.py --dedup-strategy normalized
 """
 
 from __future__ import annotations
@@ -13,46 +13,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
 import traceback
-from pathlib import Path
 
-from typing import Any
+from recon_graphrag import GraphRAG
 
-from recon_graphrag.retrieval.search_drift import DriftSearchRetriever
-from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
-from recon_graphrag.retrieval.search_local import LocalSearchRetriever
-
-# Allow this script to run both as `python examples/advanced/compare_backends.py`
-# and as `python -m examples.advanced.compare_backends` from the project root.
-_EXAMPLES_DIR = Path(__file__).resolve().parent.parent
-if str(_EXAMPLES_DIR) not in sys.path:
-    sys.path.insert(0, str(_EXAMPLES_DIR))
-
-from common import SEARCH_OPTIONS, get_backend_targets
-from config import get_embedder, get_llm
-from prompts import (
-    DRIFT_ANSWER_PROMPT,
-    GLOBAL_MAP_PROMPT,
-    GLOBAL_REDUCE_PROMPT,
-    LOCAL_ANSWER_PROMPT,
-)
-from query_suite import MOVIE_QUERY_SUITE
-
-
-def _configure_movie_rag(graph_store, llm, embedder, *, graph_name: str = "entity-graph") -> dict[str, Any]:
-    """Create and configure local, global, and drift search instances."""
-    local = LocalSearchRetriever(graph_store, llm, embedder, graph_name=graph_name)
-    local.answer_prompt = LOCAL_ANSWER_PROMPT
-
-    global_search = GlobalSearchRetriever(graph_store, llm, graph_name=graph_name)
-    global_search.map_prompt = GLOBAL_MAP_PROMPT
-    global_search.reduce_prompt = GLOBAL_REDUCE_PROMPT
-
-    drift = DriftSearchRetriever(graph_store, llm, embedder, graph_name=graph_name)
-    drift.reduce_prompt = DRIFT_ANSWER_PROMPT
-
-    return {"local": local, "global": global_search, "drift": drift}
+try:
+    from .common import SEARCH_OPTIONS, configure_movie_rag, get_backend_targets
+    from .config import get_embedder, get_llm
+    from .query_suite import MOVIE_QUERY_SUITE
+except ImportError:
+    from common import SEARCH_OPTIONS, configure_movie_rag, get_backend_targets
+    from config import get_embedder, get_llm
+    from query_suite import MOVIE_QUERY_SUITE
 
 
 def parse_args():
@@ -62,12 +34,12 @@ def parse_args():
     parser.add_argument(
         "--llm-provider",
         choices=["openrouter", "azure_openai", "openai"],
-        default=os.getenv("LLM_PROVIDER", "openrouter"),
+        default=os.getenv("LLM_PROVIDER", "azure_openai"),
     )
     parser.add_argument(
         "--embedder-provider",
         choices=["openrouter", "azure_openai", "openai", "sentence-transformer"],
-        default=os.getenv("EMBEDDER_PROVIDER", "openrouter"),
+        default=os.getenv("EMBEDDER_PROVIDER", "azure_openai"),
     )
     parser.add_argument(
         "--limit",
@@ -98,19 +70,12 @@ def parse_args():
 
 async def _dedup_dry_run(store, strategy: str, embedder, llm) -> dict:
     try:
-        if strategy == "exact":
-            return await store.resolve_entities_exact(dry_run=True)
-        if strategy == "normalized":
-            return await store.resolve_entities_normalized(dry_run=True)
-        if strategy == "fuzzy":
-            return await store.resolve_entities_fuzzy(dry_run=True)
-        if strategy == "hybrid":
-            return await store.resolve_entities_hybrid(
-                dry_run=True,
-                embedder=embedder,
-                llm=llm,
-            )
-        return {"error": f"Unknown strategy: {strategy}"}
+        return await store.resolve_entities(
+            strategy=strategy,
+            dry_run=True,
+            embedder=embedder if strategy == "hybrid" else None,
+            llm=llm if strategy == "hybrid" else None,
+        )
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -144,14 +109,13 @@ def _context_headings(context: str) -> list[str]:
 
 
 async def _run_one(
-    search_instances: dict[str, Any],
+    graph_rag: GraphRAG,
     query: str,
     mode: str,
     tracebacks: bool = False,
 ) -> dict:
     try:
-        search = search_instances[mode]
-        result = await search.search(query, **SEARCH_OPTIONS[mode])
+        result = await graph_rag.search(query, mode=mode, **SEARCH_OPTIONS[mode])
         return {
             "ok": True,
             "answer": result.answer,
@@ -212,9 +176,8 @@ async def main():
     targets = {name: store for name, store, _ in get_backend_targets("all")}
     neo4j_store = targets["neo4j"]
     memgraph_store = targets["memgraph"]
-
-    neo4j_rag = _configure_movie_rag(neo4j_store, llm, embedder)
-    memgraph_rag = _configure_movie_rag(memgraph_store, llm, embedder)
+    neo4j_rag = configure_movie_rag(GraphRAG(neo4j_store, llm, embedder))
+    memgraph_rag = configure_movie_rag(GraphRAG(memgraph_store, llm, embedder))
 
     neo4j_stats = _safe_stats(neo4j_store)
     memgraph_stats = _safe_stats(memgraph_store)

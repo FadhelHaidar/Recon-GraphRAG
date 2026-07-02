@@ -1,7 +1,8 @@
 """LLM factory functions.
 
 Convenience module to create LLM instances without depending on
-``neo4j-graphrag`` provider wrappers.
+``neo4j-graphrag`` provider wrappers. The public provider keys and common
+constructor kwargs intentionally mirror the previous factory.
 """
 
 from __future__ import annotations

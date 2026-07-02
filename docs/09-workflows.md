@@ -1,15 +1,13 @@
 # Advanced Workflows
 
-Recon-GraphRAG's high-level examples ([`GraphBuilderPipeline`](05-pipelines.md), [search classes](06-search.md)) cover the most common path, but the library is composed of smaller, interchangeable building blocks. This guide explains those primitives so you can assemble custom workflows, implement new backends, or inspect intermediate artifacts without running a full pipeline.
+Recon-GraphRAG's high-level examples ([`GraphBuilderPipeline`](05-pipelines.md), [`GraphRAG.search()`](06-search.md)) cover the most common path, but the library is composed of smaller, interchangeable building blocks. This guide explains those primitives so you can assemble custom workflows, implement new backends, or inspect intermediate artifacts without running a full pipeline.
 
 ## When to use the building blocks
 
 Reach for these primitives when you want to:
 
 - Extract entities once and save the structured output to JSON/Parquet before database ingestion.
-- Call `LocalSearchRetriever`, `GlobalSearchRetriever`, or `DriftSearchRetriever` directly for fine-grained control.
-- Use `MixedContextBuilder` to combine entity subgraph, community reports, and claims into a token-budgeted context for local search.
-- Inspect `DriftQueryState` and `DriftAction` to trace the iterative DRIFT traversal.
+- Call `LocalSearchRetriever`, `GlobalSearchRetriever`, or `DriftSearchRetriever` directly instead of through `GraphRAG`.
 - Implement a custom `GraphStore` backend (Postgres, in-memory, etc.).
 - Add side effects (logging, caching, validation) by wrapping `GraphWriter`.
 - Swap in your own LLM or embedder that does not fit the factory functions.
@@ -454,11 +452,9 @@ See [`recon_graphrag/graphdb/base.py`](../recon_graphrag/graphdb/base.py) for th
 
 `GraphBuilderPipeline` calls entity resolution for you after writing extracted
 entities, but the same operation is also available directly on any graph store
-through the strategy-specific methods: `GraphStore.resolve_entities_exact()`,
-`GraphStore.resolve_entities_normalized()`, `GraphStore.resolve_entities_fuzzy()`,
-and `GraphStore.resolve_entities_hybrid()`. Use these when you have already loaded
-graph data and want to inspect or merge duplicate entities without running
-extraction again.
+that implements `GraphStore.resolve_entities()`. Use this when you have already
+loaded graph data and want to inspect or merge duplicate entities without
+running extraction again.
 
 Start with a dry run:
 
@@ -471,8 +467,9 @@ from examples.config import get_neo4j_store
 async def main():
     store = get_neo4j_store()
 
-    result = await store.resolve_entities_normalized(
+    result = await store.resolve_entities(
         graph_name="entity-graph",
+        strategy="normalized",
         dry_run=True,
     )
     print(result)
@@ -481,37 +478,26 @@ async def main():
 asyncio.run(main())
 ```
 
-Then run the same method without `dry_run` to apply merges:
+Then run the same strategy without `dry_run` to apply merges:
 
 ```python
-result = await store.resolve_entities_normalized(
+result = await store.resolve_entities(
     graph_name="entity-graph",
+    strategy="normalized",
     dry_run=False,
 )
 ```
 
-Supported methods:
+Supported strategies:
 
-| Method | Behavior |
+| Strategy | Behavior |
 | ---- | ---- |
-| `resolve_entities_exact` | Merge entities with the same raw `resolve_property` value. |
-| `resolve_entities_normalized` | Merge case, punctuation, whitespace, and common organization-suffix variants. |
-| `resolve_entities_fuzzy` | Use string similarity to merge high-confidence matches and return lower-confidence review candidates. |
-| `resolve_entities_hybrid` | Combine normalized/fuzzy matching with optional aliases, embeddings, and LLM review. |
+| `exact` | Merge entities with the same raw `resolve_property` value. |
+| `normalized` | Merge case, punctuation, whitespace, and common organization-suffix variants. |
+| `fuzzy` | Use string similarity to merge high-confidence matches and return lower-confidence review candidates. |
+| `hybrid` | Combine normalized/fuzzy matching with optional aliases, embeddings, and LLM review. |
 
-For `resolve_entities_fuzzy`, pass fuzzy-specific thresholds:
-
-```python
-result = await store.resolve_entities_fuzzy(
-    graph_name="entity-graph",
-    dry_run=True,
-    merge_threshold=95.0,
-    review_threshold=85.0,
-    max_candidates_per_entity=20,
-)
-```
-
-For `resolve_entities_hybrid`, pass the extra signals you want to use:
+For `hybrid`, pass the extra signals you want to use:
 
 ```python
 from examples.config import get_embedder, get_llm, get_neo4j_store
@@ -520,8 +506,9 @@ store = get_neo4j_store()
 embedder = get_embedder()
 llm = get_llm()
 
-result = await store.resolve_entities_hybrid(
+result = await store.resolve_entities(
     graph_name="entity-graph",
+    strategy="hybrid",
     dry_run=True,
     embedder=embedder,
     llm=llm,
@@ -541,8 +528,9 @@ readable keys, aliases, labels, and non-internal properties. You can narrow the
 extra properties sent to the LLM:
 
 ```python
-result = await store.resolve_entities_hybrid(
+result = await store.resolve_entities(
     graph_name="entity-graph",
+    strategy="hybrid",
     dry_run=True,
     embedder=embedder,
     llm=llm,
@@ -557,8 +545,9 @@ Use conflict properties when same-name entities should stay separate if a
 domain key differs:
 
 ```python
-result = await store.resolve_entities_hybrid(
+result = await store.resolve_entities(
     graph_name="entity-graph",
+    strategy="hybrid",
     dry_run=True,
     embedder=embedder,
     llm=llm,
@@ -580,8 +569,9 @@ candidates. To let hybrid resolution apply LLM-approved merges, opt in
 explicitly:
 
 ```python
-result = await store.resolve_entities_hybrid(
+result = await store.resolve_entities(
     graph_name="entity-graph",
+    strategy="hybrid",
     embedder=embedder,
     llm=llm,
     allow_ai_auto_merge=True,
@@ -605,7 +595,7 @@ There are two deduplication moments in the graph-building flow:
 | Step | Where it happens | Scope |
 | ---- | ---- | ---- |
 | Assembly deduplication | `GraphDocumentAssembler` | In-memory, within the `GraphDocument` being assembled from one extraction run. It collapses repeated extracted entities and relationships before database write. |
-| Entity resolution | `GraphStore.resolve_entities_*` | Database-level, across persisted `__Entity__` nodes for a `graph_name`. This is the same resolver that `GraphBuilderPipeline` calls when `perform_entity_resolution=True`. |
+| Entity resolution | `GraphStore.resolve_entities()` | Database-level, across persisted `__Entity__` nodes for a `graph_name`. This is the same resolver that `GraphBuilderPipeline` calls when `perform_entity_resolution=True`. |
 
 So independent entity resolution is not a different algorithm from the
 GraphBuilderPipeline step. It is the same store-level resolver, called manually.
@@ -629,7 +619,7 @@ Backend notes:
 
 ## Retrieval primitives
 
-You can instantiate retrievers directly for fine-grained control over index names, prompts, or result formatting.
+Instead of `GraphRAG.search()`, you can instantiate retrievers directly. This is useful when you need fine-grained control over index names, prompts, or result formatting.
 
 All retrievers return a [`SearchResult`](../recon_graphrag/models/types.py)
 with `query`, `mode`, `answer`, `context`, and optional `citations`.
@@ -673,10 +663,10 @@ result = await retriever.search("Who directed Inception?", top_k=10)
 
 ### `GlobalSearchRetriever`
 
-Community-report-based map-reduce search.
+Community-summaries-based map-reduce search.
 
 ```python
-from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
+from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
 
 retriever = GlobalSearchRetriever(
     graph_store=store,
@@ -694,19 +684,19 @@ Hybrid of local entity context and community context.
 
 ```python
 from recon_graphrag.retrieval.drift import DriftSearchRetriever
-from recon_graphrag.retrieval.drift_types import DriftSearchConfig
 
 retriever = DriftSearchRetriever(
     graph_store=store,
     llm=llm,
     embedder=embedder,
-    reduce_prompt=DRIFT_ANSWER_PROMPT,
+    answer_prompt=DRIFT_ANSWER_PROMPT,
     graph_name="entity-graph",
-    config=DriftSearchConfig(primer_top_k=3, community_level="finest"),
+    community_level="finest",
 )
 result = await retriever.search(
     "How does Hans Zimmer connect Inception to Dune?",
     top_k=10,
+    community_top_k=3,
 )
 ```
 
@@ -720,94 +710,12 @@ from recon_graphrag.retrieval.hybrid import HybridEntityRetriever
 retriever = HybridEntityRetriever(
     graph_store=store,
     embedder=embedder,
-    retrieval_query=None,  # use default query; pass a custom Cypher string to override
     vector_index_name="entity-embeddings",
     fulltext_index_name="entity-names",
     context_mode="local",  # or "drift"
 )
 result = await retriever.search("Who directed Inception?", top_k=10)
 ```
-
-### `MixedContextBuilder`
-
-Builds mixed context from an entity subgraph for local search. Collects five
-candidate types — seed entities, relationships, text units (chunks), community
-reports, and claims — then ranks and token-packs them into a single context
-string.
-
-```python
-from recon_graphrag.retrieval.mixed_context import MixedContextBuilder
-
-builder = MixedContextBuilder(
-    graph_store=store,
-    embedder=embedder,
-    graph_name="entity-graph",
-)
-
-result = builder.build_context(
-    entity_matches=[{"id": "Christopher_Nolan", "score": 0.95}],
-    entity_context_rows=[...],  # from HybridEntityRetriever
-    token_budget=12000,
-    community_level="coarsest",
-)
-
-print(result.context)        # rendered context string
-print(result.citations)      # resolved citations
-print(result.used_tokens)    # tokens consumed
-```
-
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `entity_matches` | — | Ranked entity matches from hybrid retrieval (`[{"id": str, "score": float}]`). |
-| `entity_context_rows` | — | Context rows from `HybridEntityRetriever.fetch_entity_context()`. |
-| `token_budget` | — | Total token budget for the context. |
-| `allocation` | `{"text_units": 0.50, "community_reports": 0.10, "graph_facts": 0.40}` | Ratios per category. |
-| `community_level` | `"coarsest"` | Which community level to fetch reports from. |
-
-The builder distributes the token budget across three categories:
-
-- **Text units** (50%): source chunks linked to matched entities, ranked by coverage.
-- **Community reports** (10%): reports from communities containing matched entities, ranked by rating.
-- **Graph facts** (40%): entity descriptions, relationships, and claims, ranked by weight/evidence.
-
-Unused tokens overflow into other categories automatically.
-
-### DRIFT data types
-
-`DriftAction` and `DriftQueryState` track the iterative DRIFT traversal:
-
-```python
-from recon_graphrag.retrieval.drift_types import DriftAction, DriftQueryState, DriftSearchConfig
-```
-
-**`DriftAction`** — one step in the DRIFT traversal tree:
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | `str` | Unique action identifier (e.g. `"primer"`, `"a1"`, `"a2"`). |
-| `parent_id` | `str \| None` | Parent action ID (`None` for the primer). |
-| `depth` | `int` | Traversal depth (0 for primer). |
-| `query` | `str` | The follow-up question this action addresses. |
-| `answer` | `str` | LLM-generated answer for this action. |
-| `score` | `float` | Confidence score (0-100). |
-| `status` | `str` | `"pending"`, `"completed"`, or `"failed"`. |
-| `context` | `str` | Local context retrieved for this action. |
-| `citations` | `list` | Resolved citations. |
-| `follow_ups` | `list[str]` | Follow-up questions generated by the LLM. |
-| `references` | `list[dict]` | Entity/claim references from the LLM. |
-| `report_ids` | `list[str]` | Community report IDs used. |
-
-**`DriftQueryState`** — accumulated state of a DRIFT search:
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `query` | `str` | Original user query. |
-| `primer_reports` | `list[dict]` | Community reports from the primer phase. |
-| `actions` | `list[DriftAction]` | All completed and pending actions. |
-| `stopping_reason` | `str` | Why traversal stopped (budget, depth, etc.). |
-| `total_llm_calls` | `int` | LLM calls consumed so far. |
-| `phase_tokens` | `dict` | Token telemetry per phase. |
-| `failures` | `list[str]` | Non-fatal error messages. |
 
 ---
 
@@ -816,7 +724,7 @@ from recon_graphrag.retrieval.drift_types import DriftAction, DriftQueryState, D
 [`recon_graphrag.communities.pipeline.CommunityPipeline`](../recon_graphrag/communities/pipeline.py) is a convenience wrapper around two steps:
 
 1. `graph_store.detect_communities()` — run the Leiden algorithm.
-2. `CommunitySummarizer` — generate a structured report per community.
+2. `CommunitySummarizer` — generate a natural-language summary per community.
 
 You can call these steps individually if you need more control:
 
@@ -824,7 +732,7 @@ You can call these steps individually if you need more control:
 from recon_graphrag.communities.summarization import CommunitySummarizer
 
 summarizer = CommunitySummarizer(store, llm, graph_name="entity-graph")
-reports, stats = await summarizer.generate_all(level=0)
+summaries = await summarizer.summarize_all(level=0)
 ```
 
 ---
@@ -920,4 +828,4 @@ async def extract_to_json(text: str, schema: GraphSchema, llm, out_path: Path):
 
 - Combine these primitives with custom `GraphWriter` for logging or caching.
 - See [`docs/05-pipelines.md`](05-pipelines.md) for the high-level pipeline that wraps these steps.
-- See [`docs/06-search.md`](06-search.md) for the search API reference.
+- See [`docs/06-search.md`](06-search.md) for the high-level `GraphRAG.search()` API.

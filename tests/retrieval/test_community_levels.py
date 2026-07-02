@@ -1,10 +1,14 @@
 """Tests for semantic community-level selection."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from recon_graphrag.llm import LLMResponse
+from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.retrieval.community_levels import resolve_community_level
-from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
+from recon_graphrag.retrieval.drift import DriftSearchRetriever
+from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
 
 
 class FakeGraphStore:
@@ -22,27 +26,28 @@ class FakeGraphStore:
         if "Community" in query and "report_text" in query:
             level = params.get("level", 0)
             return [
-                {"id": "c2", "level": level, "report_text": "Coarse community report"}
+                {"id": "c2", "level": level, "summary": "Coarse community summary"}
             ]
 
         return []
 
-    def vector_search(self, index_name, query_vector, k, label=None, filters=None):
-        return [{"id": "a", "score": 0.8}]
+    def get_community_summaries_by_keys(self, graph_name, keys, top_k):
+        self.calls.append(
+            (
+                "get_community_summaries_by_keys",
+                {"graph_name": graph_name, "keys": keys, "top_k": top_k},
+            )
+        )
+        return [{"id": "c2", "summary": "Coarse community summary", "level": 2}]
 
-    def keyword_search(self, index_name, query_text, k, label=None, filters=None):
-        return [{"id": "a", "score": 1.0}]
-
-    def fetch_entity_context(self, matches, retrieval_query=None, query_params=None, mode="local", graph_name=None):
-        return [
-            {
-                "title": "Test (Entity)",
-                "relationships": [],
-                "source_text": [],
-                "source_chunk_ids": ["chunk:1"],
-                "score": 0.8,
-            }
-        ]
+    def get_community_entities_by_keys(self, graph_name, keys):
+        self.calls.append(
+            (
+                "get_community_entities_by_keys",
+                {"graph_name": graph_name, "keys": keys},
+            )
+        )
+        return []
 
     def resolve_chunk_citations(self, graph_name, chunk_ids):
         self.calls.append(
@@ -70,10 +75,34 @@ class FakeLLM:
         return LLMResponse(content="answer")
 
 
-class FakeEmbedder:
-    async def async_embed_query(self, text):
-        return [0.1, 0.2, 0.3]
-
+class FakeHybridRetriever:
+    async def search(self, query_text, top_k, **kwargs):
+        return SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    content={
+                        "title": "Inception (Movie)",
+                        "relationships": [],
+                        "source_text": ["source"],
+                        "source_chunk_ids": ["chunk:1"],
+                        "communities": [
+                            {
+                                "id": "c0",
+                                "level": 0,
+                                "graph_name": "entity-graph",
+                                "summary": "Fine summary",
+                            },
+                            {
+                                "id": "c2",
+                                "level": 2,
+                                "graph_name": "entity-graph",
+                                "summary": "Coarse summary",
+                            },
+                        ],
+                    }
+                )
+            ]
+        )
 
 
 def test_resolve_community_level_aliases():
@@ -81,21 +110,15 @@ def test_resolve_community_level_aliases():
 
     assert resolve_community_level(store, "entity-graph", None) is None
     assert resolve_community_level(store, "entity-graph", "all") is None
-    # After reversal: level 0 = coarsest, highest = finest
-    assert resolve_community_level(store, "entity-graph", "coarsest") == 0
+    assert resolve_community_level(store, "entity-graph", "finest") == 0
     assert resolve_community_level(store, "entity-graph", 0) == 0
     assert resolve_community_level(store, "entity-graph", 1) == 1
-    assert resolve_community_level(store, "entity-graph", "finest") == 2
+    assert resolve_community_level(store, "entity-graph", "coarsest") == 2
 
 
 def test_resolve_community_level_rejects_negative_level():
     with pytest.raises(ValueError):
         resolve_community_level(FakeGraphStore(), "entity-graph", -1)
-
-
-def test_resolve_community_level_rejects_invalid_string():
-    with pytest.raises(ValueError):
-        resolve_community_level(FakeGraphStore(), "entity-graph", "middle")
 
 
 class EmptyGraphStore:
@@ -105,14 +128,14 @@ class EmptyGraphStore:
         return []
 
 
-def test_resolve_finest_on_empty_graph_returns_none():
+def test_resolve_finest_on_empty_graph_returns_zero():
     store = EmptyGraphStore()
-    assert resolve_community_level(store, "entity-graph", "finest") is None
+    assert resolve_community_level(store, "entity-graph", "finest") == 0
 
 
-def test_resolve_coarsest_on_empty_graph_returns_zero():
+def test_resolve_coarsest_on_empty_graph_returns_none():
     store = EmptyGraphStore()
-    assert resolve_community_level(store, "entity-graph", "coarsest") == 0
+    assert resolve_community_level(store, "entity-graph", "coarsest") is None
 
 
 @pytest.mark.asyncio
@@ -123,39 +146,114 @@ async def test_global_search_accepts_coarsest_alias():
     result = await retriever.search("themes", community_level="coarsest")
 
     assert result.answer.strip()
-    # After reversal: "coarsest" → level 0
+    # Verify the resolved level was 2 (coarsest)
     report_call = [
         c for c in store.calls
         if c[0] == "execute_query" and "report_text" in c[1]["query"]
     ]
     assert len(report_call) == 1
-    assert report_call[0][1]["params"]["level"] == 0
+    assert report_call[0][1]["params"]["level"] == 2
 
 
 @pytest.mark.asyncio
 async def test_drift_search_accepts_coarsest_alias():
-    """DriftSearchRetriever passes community_level to vector_search_community_reports."""
-    from recon_graphrag.retrieval.search_drift import DriftSearchRetriever
-
     store = FakeGraphStore()
-    store.vector_search_community_reports_calls = []
-
-    def _mock_vscr(query_vector, graph_name, top_k=3, level=None):
-        store.vector_search_community_reports_calls.append({"top_k": top_k, "level": level})
-        return [{"id": "r1", "level": level, "report_text": "Test report"}]
-
-    store.vector_search_community_reports = _mock_vscr
     llm = FakeLLM()
-    embedder = FakeEmbedder()
+    retriever = object.__new__(DriftSearchRetriever)
+    retriever.graph_store = store
+    retriever.llm = llm
+    retriever.graph_name = "entity-graph"
+    retriever.community_level = "coarsest"
+    retriever.answer_prompt = "{query}\n{entity_context}\n{community_context}\n{bridging_context}"
+    retriever._retriever = FakeHybridRetriever()
 
-    retriever = DriftSearchRetriever(store, llm, embedder)
+    result = await retriever.search("themes", top_k=1)
+
+    assert result.answer == "answer"
+    assert result.citations == [
+        Citation(
+            document_id="doc:1",
+            chunk_id="chunk:1",
+            metadata={
+                "collection": "movies",
+                "record_id": "row-42",
+                "source": "row-source",
+                "document_id": "doc:1",
+                "chunk_id": "chunk:1",
+            },
+        )
+    ]
+    summary_call = [
+        c for c in store.calls if c[0] == "get_community_summaries_by_keys"
+    ][0]
+    assert summary_call[1]["keys"] == [{"id": "c2", "level": 2}]
+    citation_call = [c for c in store.calls if c[0] == "resolve_chunk_citations"][0]
+    assert citation_call[1] == {
+        "graph_name": "entity-graph",
+        "chunk_ids": ["chunk:1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_drift_search_can_include_citation_metadata_in_prompt():
+    store = FakeGraphStore()
+    llm = FakeLLM()
+    retriever = object.__new__(DriftSearchRetriever)
+    retriever.graph_store = store
+    retriever.llm = llm
+    retriever.graph_name = "entity-graph"
+    retriever.community_level = "coarsest"
+    retriever.answer_prompt = "{query}\n{entity_context}\n{community_context}\n{bridging_context}"
+    retriever._retriever = FakeHybridRetriever()
 
     result = await retriever.search(
-        "themes", top_k=1, community_level="coarsest"
+        "themes",
+        top_k=1,
+        synthesize_citation_metadata=True,
+        synthesis_metadata_keys=["record_id", "collection"],
     )
 
-    # "coarsest" → level 0 after reversal
-    assert store.vector_search_community_reports_calls[0]["level"] == 0
+    assert "Citation metadata:" in result.context
+    assert '"record_id": "row-42"' in result.context
+    assert '"collection": "movies"' in result.context
+    assert "row-source" not in result.context
+    assert "Citation metadata:" in llm.prompts[0]
 
 
+@pytest.mark.asyncio
+async def test_drift_search_with_synthesize_false_skips_llm():
+    store = FakeGraphStore()
+    llm = FakeLLM()
+    retriever = object.__new__(DriftSearchRetriever)
+    retriever.graph_store = store
+    retriever.llm = llm
+    retriever.graph_name = "entity-graph"
+    retriever.community_level = "coarsest"
+    retriever.answer_prompt = "{query}\n{entity_context}\n{community_context}\n{bridging_context}"
+    retriever._retriever = FakeHybridRetriever()
 
+    result = await retriever.search(
+        "themes",
+        top_k=1,
+        synthesize_response=False,
+    )
+
+    assert result.mode == "drift"
+    assert result.answer == ""
+    assert result.context
+    assert result.citations == [
+        Citation(
+            document_id="doc:1",
+            chunk_id="chunk:1",
+            metadata={
+                "collection": "movies",
+                "record_id": "row-42",
+                "source": "row-source",
+                "document_id": "doc:1",
+                "chunk_id": "chunk:1",
+            },
+        )
+    ]
+    assert llm.prompts == []
+    assert result.metadata["synthesize_response"] is False
+    assert result.metadata["response_synthesis_skipped"] is True

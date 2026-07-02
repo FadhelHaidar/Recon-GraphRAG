@@ -6,12 +6,8 @@ the graph for semantic retrieval.
 
 from __future__ import annotations
 
-import asyncio
-
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
-
-_DEFAULT_CONCURRENCY = 10
 
 
 class EntityEmbedder:
@@ -22,49 +18,38 @@ class EntityEmbedder:
         graph_store: GraphStore,
         embedder: BaseEmbedder,
         graph_name: str = "entity-graph",
-        concurrency: int = _DEFAULT_CONCURRENCY,
     ):
         self.graph_store = graph_store
         self.embedder = embedder
         self.graph_name = graph_name
-        self.concurrency = concurrency
 
     async def embed_entities(self, batch_size: int = 500):
         """Generate embeddings for entities without embeddings.
 
         Loops until all unembedded entities are processed.
-        Embeds entities concurrently up to ``self.concurrency`` at a time,
+        Concatenates label + name + description as the text to embed,
         then batch-upserts all embeddings at once.
         """
         total = 0
-        semaphore = asyncio.Semaphore(self.concurrency)
 
         while True:
             entities = self.graph_store.get_unembedded_entities(limit=batch_size)
             if not entities:
                 break
 
-            async def _embed(entity: dict) -> tuple[str, list[float]] | None:
-                async with semaphore:
+            ids, embeddings = [], []
+
+            for entity in entities:
+                try:
                     text = self._entity_to_text(entity)
                     embedding = await self.embedder.async_embed_query(text)
-                    return entity["id"], embedding
-
-            results = await asyncio.gather(
-                *[_embed(e) for e in entities],
-                return_exceptions=True,
-            )
-
-            ids, embeddings = [], []
-            for entity, result in zip(entities, results):
-                if isinstance(result, Exception):
+                    ids.append(entity["id"])
+                    embeddings.append(embedding)
+                except Exception as e:
                     name = self._value_to_text(
                         entity.get("name", entity.get("description", ""))
                     )
-                    print(f"  Error embedding entity '{name}': {result}")
-                elif result is not None:
-                    ids.append(result[0])
-                    embeddings.append(result[1])
+                    print(f"  Error embedding entity '{name}': {e}")
 
             if ids:
                 self.graph_store.upsert_vectors(ids, "embedding", embeddings)

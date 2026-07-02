@@ -291,48 +291,36 @@ async def test_extract_claims_returns_claims():
     assert llm.ainvoke.call_count == 1
     assert len(claims) == 1
     assert claims[0].subject_entity_id == "person:alice"
+    assert claims[0].claim_type == "role"
 
 
 @pytest.mark.asyncio
-async def test_extract_all_processes_chunks_concurrently():
-    """extract_all runs extraction across multiple chunks concurrently."""
+async def test_extract_claims_skips_unknown_entities():
+    """Claims referencing unknown entity IDs are filtered out."""
+    claim_response = json.dumps([
+        {
+            "subject_entity_id": "person:alice",
+            "claim_type": "role",
+            "description": "Alice is the CEO.",
+        },
+        {
+            "subject_entity_id": "person:unknown",
+            "claim_type": "role",
+            "description": "Unknown did something.",
+        },
+    ])
+
     llm = MagicMock()
-    llm.ainvoke = AsyncMock(return_value=MagicMock(content=_make_initial_response()))
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content=claim_response))
 
     extractor = LLMGraphExtractor(llm)
-    schema = _make_schema()
-    chunks = [
-        {"id": "c1", "text": "Alice acted in Inception."},
-        {"id": "c2", "text": "Bob acted in Interstellar."},
-    ]
-    results = await extractor.extract_all(chunks, schema, concurrency=2)
+    claims = await extractor.extract_claims(
+        text="text",
+        entity_ids=["person:alice"],
+    )
 
-    assert len(results) == 2
-    assert results[0][0] == "c1"
-    assert results[1][0] == "c2"
-    assert len(results[0][1].nodes) == 2
-    assert len(results[1][1].nodes) == 2
-    assert llm.ainvoke.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_extract_all_propagates_exception():
-    """extract_all raises the first chunk extraction failure."""
-    llm = MagicMock()
-
-    async def mock_invoke(prompt):
-        raise RuntimeError("provider error")
-
-    llm.ainvoke = AsyncMock(side_effect=mock_invoke)
-
-    extractor = LLMGraphExtractor(llm)
-    schema = _make_schema()
-    chunks = [
-        {"id": "c1", "text": "Alice acted in Inception."},
-    ]
-    with pytest.raises(RuntimeError, match="provider error"):
-        await extractor.extract_all(chunks, schema)
-
+    assert len(claims) == 1
+    assert claims[0].subject_entity_id == "person:alice"
 
 
 @pytest.mark.asyncio

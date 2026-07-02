@@ -104,8 +104,9 @@ async def assert_normalized_entity_resolution(store, graph_name: str) -> None:
             {"id": f"{graph_name}:openai-b", "name": "openai"},
         ],
     )
-    result = await store.resolve_entities_normalized(
+    result = await store.resolve_entities(
         graph_name=graph_name,
+        strategy="normalized",
     )
     assert result["skipped"] is False
     assert result["merged_groups"] == 1
@@ -125,8 +126,9 @@ async def assert_hybrid_alias_dry_run(store, graph_name: str) -> None:
             },
         ],
     )
-    result = await store.resolve_entities_hybrid(
+    result = await store.resolve_entities(
         graph_name=graph_name,
+        strategy="hybrid",
         dry_run=True,
         aliases={"Organization": {"IBM": ["International Business Machines"]}},
     )
@@ -159,8 +161,9 @@ async def assert_hybrid_ai_review(
             },
         ],
     )
-    result = await store.resolve_entities_hybrid(
+    result = await store.resolve_entities(
         graph_name=graph_name,
+        strategy="hybrid",
         dry_run=True,
         merge_threshold=95.0,
         review_threshold=85.0,

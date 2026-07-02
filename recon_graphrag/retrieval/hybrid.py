@@ -16,12 +16,12 @@ HybridRanker = Literal["naive", "linear"]
 class RetrievalItem:
     """One retrieved context payload."""
 
-    content: dict
+    content: dict | str
 
 
 @dataclass
 class RetrievalResult:
-    """Typed result returned by hybrid entity retrieval."""
+    """Retriever result compatible with the previous local formatting code."""
 
     items: list[RetrievalItem]
     metadata: dict | None = None
@@ -42,7 +42,6 @@ class HybridEntityRetriever:
         retrieval_query: Optional[str],
         vector_index_name: str,
         fulltext_index_name: str,
-        graph_name: str = "entity-graph",
         context_mode: str = "local",
     ):
         self.graph_store = graph_store
@@ -50,7 +49,6 @@ class HybridEntityRetriever:
         self.retrieval_query = retrieval_query
         self.vector_index_name = vector_index_name
         self.fulltext_index_name = fulltext_index_name
-        self.graph_name = graph_name
         self.context_mode = context_mode
 
     async def search(
@@ -71,20 +69,11 @@ class HybridEntityRetriever:
             query_vector = await self.embedder.async_embed_query(query_text)
 
         candidate_k = top_k * effective_search_ratio
-        filters = {"graph_name": self.graph_name}
         vector_rows = self.graph_store.vector_search(
-            self.vector_index_name,
-            query_vector,
-            candidate_k,
-            label="__Entity__",
-            filters=filters,
+            self.vector_index_name, query_vector, candidate_k, label="__Entity__"
         )
         keyword_rows = self.graph_store.keyword_search(
-            self.fulltext_index_name,
-            query_text,
-            candidate_k,
-            label="__Entity__",
-            filters=filters,
+            self.fulltext_index_name, query_text, candidate_k, label="__Entity__"
         )
         matches = merge_hybrid_scores(
             vector_rows,
@@ -112,7 +101,6 @@ class HybridEntityRetriever:
             retrieval_query=self.retrieval_query,
             query_params=query_params,
             mode=self.context_mode,
-            graph_name=self.graph_name,
         )
 
 

@@ -1,4 +1,9 @@
-"""Structured, evidence-referenced community report generation and validation."""
+"""Structured community report generation.
+
+Replaces plain-text community summaries with validated, evidence-referenced
+reports. Every finding must cite at least one reference from the packed
+community context allowlist.
+"""
 
 from __future__ import annotations
 

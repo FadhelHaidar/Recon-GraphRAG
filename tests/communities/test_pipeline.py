@@ -1,7 +1,5 @@
 """Tests for the community pipeline wrapper."""
 
-import json
-
 import pytest
 
 from recon_graphrag.communities.pipeline import CommunityPipeline
@@ -20,7 +18,7 @@ class FakeGraphStoreWithCommunities:
     def __init__(self, communities):
         self._communities = communities
         self.detect_kwargs = None
-        self.reports: list[tuple] = []
+        self.summaries: list[tuple] = []
 
     def detect_communities(self, **kwargs):
         self.detect_kwargs = kwargs
@@ -52,17 +50,8 @@ class FakeGraphStoreWithCommunities:
     def get_claims_for_entities(self, graph_name, entity_ids):
         return []
 
-    def get_child_community_reports(self, graph_name, community_id, level, child_level):
-        return []
-
-    def get_community_reports_by_keys(self, graph_name, keys, top_k):
-        return []
-
-    def store_community_report(self, report, graph_name):
-        self.reports.append((graph_name, report.community_id, report.level, report.summary))
-
-    def mark_community_report_failed(self, graph_name, community_id, level, error):
-        pass
+    def store_community_summary(self, community_id, level, summary, graph_name):
+        self.summaries.append((graph_name, community_id, level, summary))
 
 
 @pytest.mark.asyncio
@@ -78,7 +67,7 @@ async def test_build_forwards_relationship_weight_property():
     result = await pipeline.build()
 
     assert result["communities"] == 0
-    assert result["reports"] == 0
+    assert result["summaries"] == 0
     assert result["levels"] == []
     assert store.detect_kwargs["relationship_weight_property"] == "weight"
 
@@ -109,19 +98,7 @@ async def test_build_filters_levels():
     class FakeLLM:
         async def ainvoke(self, prompt):
             from recon_graphrag.llm.base import LLMResponse
-            return LLMResponse(content=json.dumps({
-                "title": "Alice and Acme",
-                "summary": "Alice works at Acme.",
-                "rating": 7,
-                "rating_explanation": "Important relationship.",
-                "findings": [{
-                    "description": "Alice is connected to Acme.",
-                    "references": [{
-                        "target_id": "person:alice",
-                        "target_type": "entity",
-                    }],
-                }],
-            }))
+            return LLMResponse(content="Test summary.")
 
     pipeline = CommunityPipeline(
         graph_store=store,
@@ -132,9 +109,7 @@ async def test_build_filters_levels():
 
     result = await pipeline.build(level=0)
 
-    # After reversal: levels processed descending, filtered by lvl >= level
-    assert result["levels"] == [1, 0]
+    assert result["levels"] == [0]
     assert result["communities"] == 2
-    assert result["reports"] == 2
-    assert result["level_stats"][0]["level"] == 1
-    assert result["level_stats"][1]["level"] == 0
+    assert result["summaries"] == 1
+    assert result["level_stats"][0]["level"] == 0

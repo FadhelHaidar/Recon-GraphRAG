@@ -24,7 +24,7 @@ from pathlib import Path
 from recon_graphrag._version import __version__, get_git_sha
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse, LLMUsage
-from recon_graphrag.retrieval.search_global import GlobalSearchRetriever
+from recon_graphrag.retrieval.global_search import GlobalSearchRetriever
 
 from .schemas import (
     PerQuestionResult,
@@ -106,7 +106,7 @@ def _make_fake_communities(corpus: list[CorpusItem]) -> list[dict]:
         communities.append(
             {
                 "id": f"comm:{doc_id}",
-                "report_text": text[:500],
+                "summary": text[:500],
                 "level": 0,
                 "score": 0.9 - (i * 0.05),
             }
@@ -181,7 +181,7 @@ async def run_baseline(
         try:
             search_result = await retriever.search(
                 question,
-                community_level=search_config.level,
+                level=search_config.level,
             )
             answer = search_result.answer
             # Extract retrieved contexts from the search diagnostics
@@ -192,10 +192,10 @@ async def run_baseline(
                     """
                     MATCH (c:Community {graph_name: $graph_name, level: $level})
                     WHERE coalesce(c.report_status, 'success') <> 'failed'
-                      AND c.report_text <> ''
+                      AND coalesce(c.report_text, c.summary, '') <> ''
                     RETURN c.id AS id,
                            c.level AS level,
-                           c.report_text AS report_text
+                           coalesce(c.report_text, c.summary) AS summary
                     ORDER BY c.id
                     """,
                     {"graph_name": retriever.graph_name, "level": search_config.level},
@@ -204,7 +204,7 @@ async def run_baseline(
                     RetrievedContext(
                         community_id=str(c.get("id", "")),
                         level=int(c.get("level", 0)),
-                        summary=str(c.get("report_text", "")),
+                        summary=str(c.get("summary", "")),
                         score=0.0,
                     )
                     for c in raw_communities[:search_config.top_k]

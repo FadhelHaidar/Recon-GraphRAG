@@ -196,12 +196,7 @@ class CommunityDetector:
 
     @staticmethod
     def _normalize_paths(leiden_results: list[dict[str, Any]]) -> dict[int, list[int]]:
-        """Return entity_id -> community path from finest to coarsest level.
-
-        MAGE returns communities in coarsest→finest order. We reverse to
-        finest→coarsest so that _write_community_hierarchy can apply the
-        same reversal logic as the Neo4j backend.
-        """
+        """Return entity_id -> community path from finest to coarsest level."""
         paths: dict[int, list[int]] = {}
         for row in leiden_results:
             entity_id = row.get("entity_id")
@@ -222,9 +217,6 @@ class CommunityDetector:
                 if not compact_path or compact_path[-1] != cid:
                     compact_path.append(cid)
 
-            # Reverse: MAGE gives coarsest→finest, we want finest→coarsest.
-            compact_path.reverse()
-
             paths[entity_id] = compact_path
         return paths
 
@@ -232,26 +224,20 @@ class CommunityDetector:
         if not paths:
             raise RuntimeError("No community paths to write.")
 
-        # Limit to max_levels (finest first in path).
+        # Limit to max_levels (finest first).
         max_depth = max(len(p) for p in paths.values())
         levels_to_write = min(max_depth, self.max_levels)
 
         entity_label = escape_cypher_identifier(self.entity_label)
         community_label = escape_cypher_identifier(self.community_label)
 
-        # Level assignment is reversed: path[0] (finest) → highest level,
-        # path[-1] (coarsest) → level 0.  This matches Microsoft GraphRAG
-        # semantics where level 0 = coarsest.
-        max_level = levels_to_write - 1
-
-        # Create Community nodes for each path index.
+        # Create Community nodes for each level.
         community_rows = []
-        for index in range(levels_to_write):
-            level = max_level - index
+        for level in range(levels_to_write):
             level_communities = set()
             for path in paths.values():
-                if index < len(path):
-                    level_communities.add(path[index])
+                if level < len(path):
+                    level_communities.add(path[level])
             for community_id in sorted(level_communities):
                 community_rows.append({
                     "community_id": str(community_id),
@@ -259,9 +245,6 @@ class CommunityDetector:
                     "graph_name": self.graph_name,
                     "uid": f"{self.graph_name}:{level}:{community_id}",
                 })
-
-        # Sort for deterministic MERGE order.
-        community_rows.sort(key=lambda r: (r["level"], r["community_id"]))
 
         self.graph_store.execute_query(
             f"""
@@ -280,11 +263,10 @@ class CommunityDetector:
         # Create IN_COMMUNITY relationships.
         membership_rows = []
         for entity_id, path in sorted(paths.items()):
-            for index in range(min(len(path), levels_to_write)):
-                level = max_level - index
+            for level in range(min(len(path), levels_to_write)):
                 membership_rows.append({
                     "entity_id": entity_id,
-                    "community_id": str(path[index]),
+                    "community_id": str(path[level]),
                     "level": level,
                 })
 
@@ -305,17 +287,12 @@ class CommunityDetector:
         )
 
         # Create PARENT_COMMUNITY edges between adjacent levels.
-        # After reversal: path[index] (finer) → level=max_level-index,
-        # path[index+1] (coarser) → level=max_level-(index+1).
-        # PARENT_COMMUNITY points from child (finer) to parent (coarser).
         parent_edges: set[tuple[str, int, str, int]] = set()
         for path in paths.values():
-            for index in range(min(len(path) - 1, levels_to_write - 1)):
-                child_id = str(path[index])
-                child_level = max_level - index
-                parent_id = str(path[index + 1])
-                parent_level = max_level - (index + 1)
-                parent_edges.add((child_id, child_level, parent_id, parent_level))
+            for level in range(min(len(path) - 1, levels_to_write - 1)):
+                child_id = str(path[level])
+                parent_id = str(path[level + 1])
+                parent_edges.add((child_id, level, parent_id, level + 1))
 
         if parent_edges:
             rows = [

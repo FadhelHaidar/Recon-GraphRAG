@@ -57,7 +57,7 @@ def test_index_manager_create_indexes_uses_graph_store_methods():
 
     manager.create_indexes()
 
-    assert len(store.vector_indexes) == 3
+    assert len(store.vector_indexes) == 2
     assert store.vector_indexes[0]["dimensions"] == 42
     assert store.fulltext_indexes == [
         {
@@ -72,12 +72,13 @@ def test_index_manager_create_indexes_uses_graph_store_methods():
 
 
 @pytest.mark.asyncio
-async def test_index_manager_resolve_entities_normalized_forwards_graph_name():
+async def test_index_manager_resolve_entities_forwards_strategy_and_graph_name():
     store = FakeGraphStore(apoc_available=True)
     manager = IndexManager(store)
 
-    result = await manager.resolve_entities_normalized(
+    result = await manager.resolve_entities(
         graph_name="movie-graph",
+        strategy="normalized",
         dry_run=True,
     )
 
@@ -88,32 +89,3 @@ async def test_index_manager_resolve_entities_normalized_forwards_graph_name():
         if "MATCH (e:__Entity__)" in call[0] and "elementId(e) AS node_id" in call[0]
     )
     assert load_call[1]["graph_name"] == "movie-graph"
-
-
-@pytest.mark.asyncio
-async def test_index_manager_resolve_entities_hybrid_uses_embedder():
-    store = FakeGraphStore(apoc_available=True)
-    embedder = object()
-    manager = IndexManager(store, embedder=embedder)
-    captured = {}
-
-    class CapturingResolver:
-        def __init__(self, graph_store):
-            self.graph_store = graph_store
-
-        async def resolve_hybrid(self, **kwargs):
-            captured["kwargs"] = kwargs
-            return {"strategy": "hybrid"}
-
-    import recon_graphrag.graphdb.neo4j.index_manager as im
-    original_resolver = im._Neo4jEntityResolver
-    im._Neo4jEntityResolver = CapturingResolver
-    try:
-        await manager.resolve_entities_hybrid(
-            graph_name="movie-graph",
-            dry_run=True,
-        )
-    finally:
-        im._Neo4jEntityResolver = original_resolver
-
-    assert captured["kwargs"]["embedder"] is embedder

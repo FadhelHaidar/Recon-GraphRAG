@@ -20,17 +20,17 @@ try:
     from .common import BACKEND_CHOICES, get_backend_targets
     from .config import (
         EMBEDDING_DIM,
-        get_embedder,
         get_llm,
     )
+    from .prompts import COMMUNITY_SUMMARY_PROMPT
     from .schema import COMMUNITY_RELATIONSHIP_TYPES
 except ImportError:
     from common import BACKEND_CHOICES, get_backend_targets
     from config import (
         EMBEDDING_DIM,
-        get_embedder,
         get_llm,
     )
+    from prompts import COMMUNITY_SUMMARY_PROMPT
     from schema import COMMUNITY_RELATIONSHIP_TYPES
 
 
@@ -47,12 +47,7 @@ def parse_args():
     parser.add_argument(
         "--llm-provider",
         choices=["openrouter", "azure_openai", "openai"],
-        default=os.getenv("LLM_PROVIDER", "openrouter"),
-    )
-    parser.add_argument(
-        "--embedder-provider",
-        choices=["openrouter", "azure_openai", "openai", "sentence-transformer"],
-        default=os.getenv("EMBEDDER_PROVIDER", "openrouter"),
+        default=os.getenv("LLM_PROVIDER", "azure_openai"),
     )
     parser.add_argument(
         "--level",
@@ -96,7 +91,6 @@ def parse_args():
 async def build_communities(
     backend: str,
     llm_provider: str,
-    embedder_provider: str,
     level: int | None = None,
     community_gamma: float = 3.0,
     community_max_levels: int = 3,
@@ -105,7 +99,6 @@ async def build_communities(
     random_seed: int = 42,
 ) -> dict:
     llm = get_llm(llm_provider)
-    embedder = get_embedder(embedder_provider)
     results = {}
 
     for name, store, index_manager_cls in get_backend_targets(backend):
@@ -114,6 +107,7 @@ async def build_communities(
 
         kwargs = {
             "relationship_types": COMMUNITY_RELATIONSHIP_TYPES,
+            "summary_prompt": COMMUNITY_SUMMARY_PROMPT,
             "max_levels": community_max_levels,
             "gamma": community_gamma,
             "theta": community_theta,
@@ -121,7 +115,7 @@ async def build_communities(
             "random_seed": random_seed,
         }
 
-        community = CommunityPipeline(store, llm, embedder=embedder, **kwargs)
+        community = CommunityPipeline(store, llm, **kwargs)
         results[name] = await community.build(level=level)
         print(f"{name} community result: {results[name]}")
 
@@ -134,7 +128,6 @@ if __name__ == "__main__":
         build_communities(
             args.backend,
             args.llm_provider,
-            args.embedder_provider,
             level=args.level,
             community_gamma=args.community_gamma,
             community_max_levels=args.community_max_levels,

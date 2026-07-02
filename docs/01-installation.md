@@ -197,7 +197,7 @@ python your_script.py
 
 ```python
 # your_script.py
-from recon_graphrag import LocalSearchRetriever, GraphBuilderPipeline
+from recon_graphrag import GraphRAG, GraphBuilderPipeline
 ```
 
 Python automatically adds the current working directory to `sys.path`, so the package is importable without installation.

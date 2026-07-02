@@ -1,11 +1,11 @@
-"""LLM-based community report generation.
+"""LLM-based community summarization.
 
 For each community, collect its entities and relationships, format as structured
-text, and generate a structured report via LLM. This enables global retrieval over
+text, and generate a summary via LLM. This enables global-level retrieval over
 high-level community insights instead of individual nodes.
 
-Generates structured CommunityReport objects with validated findings and
-references.
+When ``use_reports=True``, generates structured CommunityReport objects with
+validated findings and references instead of plain-text summaries.
 
 Supports concurrent generation within a level and fingerprint-based resume
 to skip communities whose context has not changed.
@@ -14,26 +14,19 @@ to skip communities whose context has not changed.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 from recon_graphrag.communities.context import (
     CommunityContext,
     enrich_context_with_claims,
     build_reference_ids,
-    build_packed_reference_ids,
     pack_community_context,
     parse_community_context,
     render_community_context,
 )
-from recon_graphrag.utils.tokens import (
-    ApproximateTokenCounter,
-    PackItem,
-    TokenCounter,
-    pack_items,
-)
+from recon_graphrag.utils.tokens import TokenCounter
 from recon_graphrag.communities.reports import (
     ReportParser,
     ReportRubric,
@@ -44,6 +37,22 @@ from recon_graphrag.communities.reports import (
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse
 from recon_graphrag.models.artifacts import CommunityReport, report_to_text
+
+
+DEFAULT_SUMMARY_PROMPT = """Summarize the following cluster of related entities and their connections.
+
+Entities and relationships:
+{context}
+
+Generate a concise but comprehensive summary (2-4 paragraphs) that:
+1. Identifies the main theme or area covered
+2. Describes the key entities involved
+3. Highlights important patterns and connections
+4. Notes any notable insights or implications
+
+Write in plain, clear language. Do not mention communities, graphs, nodes, or edges.
+
+Summary:"""
 
 
 @dataclass
@@ -60,36 +69,40 @@ class BuildStats:
 
 
 class CommunitySummarizer:
-    """Generate LLM reports for each community in the knowledge graph."""
+    """Generate LLM summaries for each community in the knowledge graph."""
 
     def __init__(
         self,
         graph_store: GraphStore,
         llm: BaseLLM,
+        prompt_template: Optional[str] = None,
         graph_name: str = "entity-graph",
+        use_reports: bool = False,
         report_rubric: ReportRubric | None = None,
-        concurrency: int = 5,
+        concurrency: int = 1,
         max_context_tokens: int | None = None,
         token_counter: TokenCounter | None = None,
     ):
         self.graph_store = graph_store
         self.llm = llm
+        self.prompt_template = prompt_template or DEFAULT_SUMMARY_PROMPT
         self.graph_name = graph_name
+        self.use_reports = use_reports
         self.report_rubric = report_rubric
         self.concurrency = concurrency
         self.max_context_tokens = max_context_tokens
         self.token_counter = token_counter
         self._report_parser = ReportParser()
 
-    async def generate_all(
+    async def summarize_all(
         self, level: int = 0, skip_existing: bool = False
     ) -> tuple[list[dict], BuildStats]:
-        """Generate reports for all communities at a hierarchy level.
+        """Summarize all communities at a given hierarchy level.
 
         Args:
-            level: Community hierarchy level to report.
+            level: Community hierarchy level to summarize.
             skip_existing: If True, skip communities that already have a
-                report (fingerprint-based resume).
+                summary (fingerprint-based resume).
 
         Returns:
             Tuple of (results list, build stats).
@@ -110,48 +123,50 @@ class CommunitySummarizer:
                 stats.attempted += 1
 
                 # Fingerprint-based resume
-                report_context: CommunityContext | None = None
-                input_fingerprint: str | None = None
-                if skip_existing:
-                    report_context = self._fetch_community_context_obj(cid, level)
-                    input_fingerprint = self._report_input_fingerprint(
-                        report_context, cid, level
-                    )
-                    if self._has_existing_report(cid, level, input_fingerprint):
-                        stats.skipped += 1
-                        print(f"  Skipping community {cid} (report unchanged)")
-                        return None
+                if skip_existing and self._has_existing_summary(cid, level):
+                    stats.skipped += 1
+                    print(f"  Skipping community {cid} (already summarized)")
+                    return None
 
                 entity_count = comm.get("entity_count", 0)
-                print(f"  Reporting community {cid} ({entity_count} entities)...")
+                print(f"  Summarizing community {cid} ({entity_count} entities)...")
                 try:
-                    report = await self.generate_report(
-                        cid,
-                        level,
-                        context=report_context,
-                        input_fingerprint=input_fingerprint,
-                    )
-                    report_text = report_to_text(report)
-                    self.graph_store.store_community_report(report, self.graph_name)
-                    stats.succeeded += 1
-                    return {
-                        "id": cid,
-                        "level": level,
-                        "report_text": report_text,
-                        "report": report,
-                    }
+                    if self.use_reports:
+                        report = await self.generate_report(cid, level)
+                        summary_text = report_to_text(report)
+                        self.graph_store.store_community_report(
+                            report, self.graph_name
+                        )
+                        stats.succeeded += 1
+                        return {
+                            "id": cid,
+                            "level": level,
+                            "summary": summary_text,
+                            "report": report,
+                        }
+                    else:
+                        summary = await self.summarize_community(cid, level)
+                        if not summary.strip():
+                            stats.failed += 1
+                            return None
+                        self.graph_store.store_community_summary(
+                            cid, level, summary, self.graph_name
+                        )
+                        stats.succeeded += 1
+                        return {"id": cid, "level": level, "summary": summary}
                 except Exception as e:
                     stats.failed += 1
-                    try:
-                        self.graph_store.mark_community_report_failed(
-                            self.graph_name,
-                            cid,
-                            level,
-                            str(e),
-                        )
-                    except Exception:
-                        pass
-                    print(f"  Error reporting community {cid}: {e}")
+                    if self.use_reports:
+                        try:
+                            self.graph_store.mark_community_report_failed(
+                                self.graph_name,
+                                cid,
+                                level,
+                                str(e),
+                            )
+                        except Exception:
+                            pass
+                    print(f"  Error summarizing community {cid}: {e}")
                     return None
 
         tasks = [_process_one(comm) for comm in communities]
@@ -167,34 +182,32 @@ class CommunitySummarizer:
         stats.elapsed_seconds = time.monotonic() - start
         return results, stats
 
-    def _has_existing_report(
-        self,
-        community_id: str,
-        level: int,
-        input_fingerprint: str | None = None,
-    ) -> bool:
-        """Check if a community already has a current stored report."""
+    def _has_existing_summary(self, community_id: str, level: int) -> bool:
+        """Check if a community already has a stored summary."""
         try:
-            rows = self.graph_store.get_community_reports_by_keys(
+            rows = self.graph_store.get_community_summaries_by_keys(
                 graph_name=self.graph_name,
                 keys=[{"id": community_id, "level": level}],
                 top_k=1,
             )
-            if not rows or not rows[0].get("report_text", "").strip():
-                return False
-            if input_fingerprint is None:
+            if rows and rows[0].get("summary", "").strip():
                 return True
-            return rows[0].get("input_fingerprint") == input_fingerprint
         except Exception:
             pass
         return False
 
+    async def summarize_community(self, community_id: str, level: int = 0) -> str:
+        """Summarize a single community by collecting its context."""
+        context = self._fetch_community_context(community_id, level)
+        if not context.strip():
+            return ""
+
+        prompt = self.prompt_template.format(context=context)
+        response: LLMResponse = await self.llm.ainvoke(prompt)
+        return response.content
+
     async def generate_report(
-        self,
-        community_id: str,
-        level: int = 0,
-        context: CommunityContext | None = None,
-        input_fingerprint: str | None = None,
+        self, community_id: str, level: int = 0
     ) -> CommunityReport:
         """Generate a structured community report with validated references.
 
@@ -202,51 +215,28 @@ class CommunitySummarizer:
         validates references, and attempts one repair on failure.
         """
         # Fetch context with claims
-        context = context or self._fetch_community_context_obj(community_id, level)
-        input_fingerprint = input_fingerprint or self._report_input_fingerprint(
-            context, community_id, level
-        )
+        context = self._fetch_community_context_obj(community_id, level)
         if not context.edges and not context.entities:
-            report = CommunityReport(
+            return CommunityReport(
                 id=f"report:{community_id}:{level}",
                 community_id=community_id,
                 level=level,
                 title="Empty community",
                 summary="No entities or relationships found.",
             )
-            report.version.input_fingerprint = input_fingerprint
-            return report
 
         # Build reference allowlist
         reference_ids = build_reference_ids(context)
         valid_ids = set(reference_ids)
 
         # Render context text (packed if budget is set)
-        context_tokens_used: int | None = None
-        context_truncated = False
         if self.max_context_tokens is not None:
-            child_rows = self._fetch_child_report_rows(community_id, level)
-            if child_rows:
-                (
-                    context_text,
-                    context_tokens_used,
-                    context_truncated,
-                    reference_ids,
-                ) = self._build_parent_context(context, child_rows, self.max_context_tokens)
-                valid_ids = set(reference_ids)
-            else:
-                packed = pack_community_context(
-                    context,
-                    max_tokens=self.max_context_tokens,
-                    counter=self.token_counter,
-                )
-                context_text = packed.text
-                context_tokens_used = packed.used_tokens
-                context_truncated = packed.truncated
-                # Use allowlist from packed context so findings can only
-                # reference items the LLM actually saw.
-                reference_ids = build_packed_reference_ids(context, packed)
-                valid_ids = set(reference_ids)
+            packed = pack_community_context(
+                context,
+                max_tokens=self.max_context_tokens,
+                counter=self.token_counter,
+            )
+            context_text = packed.text
         else:
             context_text = render_community_context(context)
 
@@ -262,16 +252,12 @@ class CommunitySummarizer:
         # First attempt
         response: LLMResponse = await self.llm.ainvoke(prompt)
         try:
-            report = self._report_parser.parse(
+            return self._report_parser.parse(
                 response.content,
                 community_id=community_id,
                 level=level,
                 valid_ids=valid_ids,
             )
-            report.version.input_fingerprint = input_fingerprint
-            report.context_tokens_used = context_tokens_used
-            report.context_truncated = context_truncated
-            return report
         except ReportValidationError as e:
             # One repair attempt
             print(f"  Report validation failed for {community_id}, attempting repair...")
@@ -283,163 +269,30 @@ class CommunitySummarizer:
             )
             repair_response = await self.llm.ainvoke(repair_prompt)
             try:
-                report = self._report_parser.parse(
+                return self._report_parser.parse(
                     repair_response.content,
                     community_id=community_id,
                     level=level,
                     valid_ids=valid_ids,
                 )
-                report.version.input_fingerprint = input_fingerprint
-                report.context_tokens_used = context_tokens_used
-                report.context_truncated = context_truncated
-                return report
             except ReportValidationError as e2:
                 print(f"  Repair failed for {community_id}: {e2}")
                 raise e2
 
-    def _context_fingerprint(self, context: CommunityContext) -> str:
-        """Return a stable fingerprint for community report inputs."""
-        entities = {
-            entity.id: {
-                "id": entity.id,
-                "name": entity.name,
-                "description": entity.description,
-                "labels": sorted(entity.labels),
-            }
-            for entity in context.entities
-        }
-        for edge in context.edges:
-            for entity in (edge.source, edge.target):
-                entities.setdefault(
-                    entity.id,
-                    {
-                        "id": entity.id,
-                        "name": entity.name,
-                        "description": entity.description,
-                        "labels": sorted(entity.labels),
-                    },
-                )
+    def _fetch_community_context(self, community_id: str, level: int = 0) -> str:
+        """Fetch context for a community as rendered text.
 
-        payload = {
-            "community_id": context.community_id,
-            "level": context.level,
-            "entities": sorted(entities.values(), key=lambda item: item["id"]),
-            "edges": sorted(
-                [
-                    {
-                        "source": edge.source.id,
-                        "target": edge.target.id,
-                        "type": edge.relationship_type,
-                        "description": edge.description,
-                        "observation_count": edge.observation_count,
-                    }
-                    for edge in context.edges
-                ],
-                key=lambda item: (item["source"], item["target"], item["type"]),
-            ),
-            "claims": sorted(
-                [
-                    {
-                        "id": claim.id,
-                        "entity_id": claim.entity_id,
-                        "claim_type": claim.claim_type,
-                        "description": claim.description,
-                        "status": claim.status,
-                        "object_entity_id": claim.object_entity_id,
-                        "source_text": claim.source_text,
-                        "text_unit_id": claim.text_unit_id,
-                        "start_date": claim.start_date,
-                        "end_date": claim.end_date,
-                    }
-                    for claim in context.claims
-                ],
-                key=lambda item: item["id"],
-            ),
-        }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        Level 0: degree-ranked entities and intra-community relationships.
+        Level > 0: child community summaries first, then entity context fallback.
+        """
+        if level == 0:
+            return self._fetch_ranked_entity_context(community_id, level)
 
-    def _build_parent_context(
-        self,
-        context: CommunityContext,
-        child_rows: list[dict],
-        max_tokens: int,
-    ) -> tuple[str, int, bool, list[str]]:
-        counter = self.token_counter or ApproximateTokenCounter()
-        child_budget = int(max_tokens * 0.6)
-        child_items = [
-            PackItem(
-                id=str(row["id"]),
-                text=(
-                    f"--- Sub-community {row['id']} "
-                    f"(level {row['level']}) ---\n{row['report_text']}"
-                ),
-                priority=float(row.get("context_tokens_used", 0) or 0),
-            )
-            for row in child_rows
-            if str(row.get("report_text", "")).strip()
-        ]
-        packed_children = pack_items(
-            child_items, child_budget, counter, truncate_oversized=True
-        )
-        remaining = max(max_tokens - packed_children.used_tokens, 0)
-        packed_direct = pack_community_context(context, max_tokens=remaining, counter=counter)
-        context_text = "\n\n".join(
-            part
-            for part in (
-                "\n\n".join(item.text for item in packed_children.included),
-                packed_direct.text,
-            )
-            if part
-        )
-        reference_ids = build_packed_reference_ids(context, packed_direct)
-        return (
-            context_text,
-            packed_children.used_tokens + packed_direct.used_tokens,
-            bool(packed_children.truncated_item_ids) or packed_direct.truncated,
-            reference_ids,
-        )
+        child_context = self._fetch_child_summary_context(community_id, level)
+        if child_context.strip():
+            return child_context
 
-    def _report_input_fingerprint(
-        self,
-        context: CommunityContext,
-        community_id: str,
-        level: int,
-    ) -> str:
-        """Fingerprint direct context plus the child reports a parent consumes."""
-        children = self._fetch_child_report_rows(community_id, level)
-        if not children:
-            return self._context_fingerprint(context)
-        payload = {
-            "context": self._context_fingerprint(context),
-            "children": [
-                {
-                    "id": row.get("id"),
-                    "input_fingerprint": row.get("input_fingerprint"),
-                    "report_text": row.get("report_text", ""),
-                }
-                for row in children
-            ],
-        }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-    def _fetch_child_report_rows(
-        self, community_id: str, level: int
-    ) -> list[dict]:
-        rows = self.graph_store.get_child_community_reports(
-            graph_name=self.graph_name,
-            community_id=community_id,
-            level=level,
-            child_level=level + 1,
-        )
-        return sorted(
-            rows or [],
-            key=lambda row: (
-                -int(row.get("context_tokens_used", 0) or 0),
-                str(row.get("id", "")),
-            ),
-        )
+        return self._fetch_ranked_entity_context(community_id, level)
 
     def _fetch_community_context_obj(
         self, community_id: str, level: int = 0
@@ -475,3 +328,38 @@ class CommunitySummarizer:
                 pass  # Claims are optional; don't fail report generation
 
         return context
+
+    def _fetch_ranked_entity_context(self, community_id: str, level: int = 0) -> str:
+        """Fetch degree-ranked entity and relationship context."""
+        rows = self.graph_store.get_community_ranked_context(
+            graph_name=self.graph_name,
+            community_id=community_id,
+            level=level,
+        )
+        context = parse_community_context(community_id, level, rows)
+        if self.max_context_tokens is not None:
+            packed = pack_community_context(
+                context,
+                max_tokens=self.max_context_tokens,
+                counter=self.token_counter,
+            )
+            return packed.text
+        return render_community_context(context)
+
+    def _fetch_child_summary_context(self, community_id: str, level: int) -> str:
+        """Fetch child community summaries for higher-level communities."""
+        results = self.graph_store.get_community_child_summary_context(
+            graph_name=self.graph_name,
+            community_id=community_id,
+            level=level,
+            child_level=level - 1,
+        )
+        if not results:
+            return ""
+
+        lines = []
+        for record in results:
+            lines.append(f"--- Sub-community {record['id']} (level {record['level']}) ---")
+            lines.append(record["summary"])
+            lines.append("")
+        return "\n".join(lines)

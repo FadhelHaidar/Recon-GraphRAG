@@ -1,4 +1,4 @@
-"""Global search: community-report-based scored map-reduce retrieval.
+"""Global search: community-summaries-based scored map-reduce retrieval.
 
 Reads community reports at one level, shuffles for unbiased ordering,
 packs into token-budgeted batches, runs parallel map calls that score
@@ -19,7 +19,7 @@ from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.models.types import SearchResult
-
+from recon_graphrag.retrieval.base import BaseRetriever
 from recon_graphrag.retrieval.citations import resolve_reference_citations
 from recon_graphrag.retrieval.community_levels import (
     CommunityLevelSelector,
@@ -84,13 +84,6 @@ You are synthesizing partial answers into a comprehensive final answer.
 4. If no partial answers contain relevant information, say so.
 
 Final Answer:"""
-
-GENERAL_KNOWLEDGE_INSTRUCTION = (
-    "\n\nNote: The available data does not contain enough information to "
-    "answer this question. You are allowed to supplement the answer with "
-    "general knowledge, but clearly indicate which parts come from general "
-    "knowledge versus the provided data."
-)
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +159,7 @@ def _diag_to_dict(diag: GlobalSearchDiagnostics) -> dict:
     }
 
 
-class GlobalSearchRetriever:
+class GlobalSearchRetriever(BaseRetriever):
     """Global search: read all reports at a level, scored map-reduce.
 
     Reads every community report at one hierarchy level, shuffles for
@@ -187,7 +180,6 @@ class GlobalSearchRetriever:
         reduce_budget_tokens: int = 12000,
         map_concurrency: int = 5,
         max_map_calls: int | None = None,
-        allow_general_knowledge: bool = False,
     ):
         self.graph_store = graph_store
         self.llm = llm
@@ -199,12 +191,12 @@ class GlobalSearchRetriever:
         self.reduce_budget_tokens = reduce_budget_tokens
         self.map_concurrency = map_concurrency
         self.max_map_calls = max_map_calls
-        self.allow_general_knowledge = allow_general_knowledge
 
     async def search(
         self,
         query: str,
-        community_level: CommunityLevelSelector,
+        level: CommunityLevelSelector = None,
+        community_level: CommunityLevelSelector = None,
         random_seed: int | None = 42,
         synthesize_response: bool = True,
     ) -> SearchResult:
@@ -212,7 +204,7 @@ class GlobalSearchRetriever:
 
         Args:
             query: User question.
-            community_level: Community hierarchy level.
+            level/community_level: Community hierarchy level.
             random_seed: Seed for reproducible report shuffling.
             synthesize_response: If False, skip the final reduce synthesis and
                 return scored partial answers in context with ``answer=""``.
@@ -222,10 +214,11 @@ class GlobalSearchRetriever:
         start = time.monotonic()
         diag = GlobalSearchDiagnostics(random_seed=random_seed)
 
+        selected_level = community_level if community_level is not None else level
         resolved_level = resolve_community_level(
             self.graph_store,
             self.graph_name,
-            community_level,
+            selected_level,
         )
 
         if resolved_level is None:
@@ -249,7 +242,7 @@ class GlobalSearchRetriever:
             )
 
         # 2. Filter failed/empty reports
-        reports = [r for r in reports if r.get("report_text", "").strip()]
+        reports = [r for r in reports if r.get("summary", "").strip()]
         diag.reports_used = len(reports)
 
         if not reports:
@@ -280,18 +273,14 @@ class GlobalSearchRetriever:
         scored = [p for p in partials if p.error is None and p.helpfulness > 0]
         diag.map_filtered_zero = diag.map_succeeded - len(scored)
 
-        use_general_knowledge = False
         if not scored:
-            if not self.allow_general_knowledge:
-                diag.elapsed_ms = int((time.monotonic() - start) * 1000)
-                return SearchResult(
-                    query=query,
-                    mode="global",
-                    answer="No relevant information found in community reports.",
-                    metadata=_diag_to_dict(diag),
-                )
-            use_general_knowledge = True
-            scored = [p for p in partials if p.error is None]
+            diag.elapsed_ms = int((time.monotonic() - start) * 1000)
+            return SearchResult(
+                query=query,
+                mode="global",
+                answer="No relevant information found in community reports.",
+                metadata=_diag_to_dict(diag),
+            )
 
         # 7. Sort by helpfulness DESC
         scored.sort(key=lambda p: (-p.helpfulness, p.batch_id))
@@ -323,7 +312,7 @@ class GlobalSearchRetriever:
                 citations=citations,
             )
 
-        answer = await self._reduce_phase(query, scored, use_general_knowledge=use_general_knowledge)
+        answer = await self._reduce_phase(query, scored)
         diag.reduce_partials_used = len(scored)
 
         diag.elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -346,10 +335,10 @@ class GlobalSearchRetriever:
         query = """
         MATCH (c:Community {graph_name: $graph_name, level: $level})
         WHERE coalesce(c.report_status, 'success') <> 'failed'
-          AND c.report_text <> ''
+          AND coalesce(c.report_text, c.summary, '') <> ''
         RETURN c.id AS id,
                c.level AS level,
-               c.report_text AS report_text
+               coalesce(c.report_text, c.summary) AS summary
         ORDER BY c.id
         """
         return self.graph_store.execute_query(
@@ -474,7 +463,7 @@ class GlobalSearchRetriever:
         WHERE c.id IN $report_ids
         RETURN c.id AS id,
                c.report_json AS report_json,
-               c.report_text AS report_text
+               coalesce(c.report_text, c.summary) AS report_text
         ORDER BY c.id
         """
         return self.graph_store.execute_query(
@@ -564,7 +553,7 @@ class GlobalSearchRetriever:
         )
         available = self.map_budget_tokens - prompt_overhead
         if available <= 0:
-            raise ValueError("map_budget_tokens is too small for the map prompt")
+            available = 1000  # fallback
 
         batches: list[MapBatch] = []
         current_texts: list[str] = []
@@ -574,12 +563,9 @@ class GlobalSearchRetriever:
 
         for report in reports:
             rid = str(report.get("id", ""))
-            report_text = report.get("report_text", "")
-            text = f"Report {rid}:\n{report_text}"
+            summary = report.get("summary", "")
+            text = f"Report {rid}:\n{summary}"
             tokens = counter.count(text)
-            if tokens > available:
-                text = counter.truncate(text, available)
-                tokens = counter.count(text)
 
             if current_tokens + tokens > available and current_texts:
                 batches.append(
@@ -708,7 +694,7 @@ class GlobalSearchRetriever:
     # ------------------------------------------------------------------
 
     async def _reduce_phase(
-        self, query: str, partials: list[PartialAnswer], *, use_general_knowledge: bool = False,
+        self, query: str, partials: list[PartialAnswer]
     ) -> str:
         """Synthesize partial answers into final answer."""
         counter = self.token_counter
@@ -735,10 +721,7 @@ class GlobalSearchRetriever:
             used_tokens += tokens
 
         partial_text = "\n\n".join(parts)
-        reduce_prompt = self.reduce_prompt
-        if use_general_knowledge:
-            reduce_prompt = reduce_prompt + GENERAL_KNOWLEDGE_INSTRUCTION
-        prompt = reduce_prompt.format(
+        prompt = self.reduce_prompt.format(
             query=query, partial_text=partial_text
         )
         response = await self.llm.ainvoke(prompt)

@@ -67,50 +67,15 @@ class MemgraphGraphWriter(BaseGraphWriter):
                 f"""
                 UNWIND $entities AS row
                 MERGE (e:__Entity__:{label} {{id: row.id, graph_name: row.graph_name}})
-                WITH e, row,
-                     e.description_summary_status AS existing_summary_status,
-                     CASE
-                       WHEN e.descriptions IS NOT NULL THEN e.descriptions
-                       WHEN e.description IS NULL OR e.description = '' THEN []
-                       ELSE [e.description]
-                     END AS existing_descriptions
                 SET e += row.properties,
                     e.type = row.type,
                     e.canonical_key = coalesce(row.canonical_key, row.properties.canonical_key),
                     e.human_readable_id = coalesce(row.human_readable_id, row.properties.human_readable_id),
                     e.name = coalesce(row.properties.name, row.properties.title, row.human_readable_id, row.id),
                     e.title = coalesce(row.properties.title, row.properties.name, row.human_readable_id, row.id),
+                    e.description = coalesce(row.properties.description, ''),
                     e.updated = timestamp(),
                     e.created = coalesce(e.created, timestamp())
-                WITH e, row, existing_summary_status, existing_descriptions,
-                     CASE
-                       WHEN row.description = '' THEN existing_descriptions
-                       ELSE reduce(acc = [], item IN existing_descriptions + [row.description] |
-                         CASE WHEN item IN acc THEN acc ELSE acc + [item] END)
-                     END AS merged_descriptions
-                SET e.descriptions = merged_descriptions,
-                    e.observation_count = size(merged_descriptions),
-                    e.description_summary_status = CASE
-                        WHEN existing_summary_status IS NOT NULL
-                         AND merged_descriptions <> existing_descriptions THEN NULL
-                        ELSE existing_summary_status
-                    END,
-                    e.description_input_fingerprint = CASE
-                        WHEN existing_summary_status IS NOT NULL
-                         AND merged_descriptions <> existing_descriptions THEN NULL
-                        ELSE e.description_input_fingerprint
-                    END,
-                    e.description_summary_error = CASE
-                        WHEN existing_summary_status IS NOT NULL
-                         AND merged_descriptions <> existing_descriptions THEN NULL
-                        ELSE e.description_summary_error
-                    END,
-                    e.description = CASE
-                        WHEN existing_summary_status IS NULL THEN
-                            reduce(text = '', item IN merged_descriptions |
-                                text + CASE WHEN text = '' THEN '' ELSE '\n' END + item)
-                        ELSE e.description
-                    END
                 """,
                 {"entities": self._entity_rows(group)},
             )
@@ -142,56 +107,11 @@ class MemgraphGraphWriter(BaseGraphWriter):
                 MATCH (source:__Entity__ {{id: row.source_id, graph_name: row.graph_name}})
                 MATCH (target:__Entity__ {{id: row.target_id, graph_name: row.graph_name}})
                 MERGE (source)-[r:{rel_label}]->(target)
-                WITH r, row, coalesce(r.source_chunk_ids, []) AS existing_chunk_ids,
-                     r.description_summary_status AS existing_summary_status,
-                     coalesce(r.descriptions,
-                       CASE WHEN r.description IS NULL OR r.description = '' THEN []
-                            ELSE [r.description] END) AS existing_descriptions
                 SET r.id = row.id,
                     r += row.properties,
                     r.graph_name = row.graph_name,
                     r.updated = timestamp(),
                     r.created = coalesce(r.created, timestamp())
-                WITH r, row, existing_descriptions, existing_summary_status,
-                     reduce(acc = [], item IN existing_chunk_ids + row.source_chunk_ids |
-                       CASE WHEN item IN acc THEN acc ELSE acc + [item] END) AS merged_chunk_ids
-                WITH r, row, merged_chunk_ids, existing_descriptions, existing_summary_status,
-                     reduce(acc = [], item IN existing_descriptions +
-                       CASE WHEN row.properties.description IS NULL OR
-                                      row.properties.description = '' THEN []
-                            ELSE [row.properties.description] END |
-                       CASE WHEN item IN acc THEN acc ELSE acc + [item] END
-                     ) AS merged_descriptions
-                SET r.source_chunk_ids = merged_chunk_ids,
-                    r.observation_count = size(merged_chunk_ids),
-                    r.weight = toFloat(size(merged_chunk_ids)),
-                    r.descriptions = merged_descriptions,
-                    r.description_summary_status = CASE
-                        WHEN existing_summary_status IS NOT NULL
-                         AND merged_descriptions <> existing_descriptions THEN NULL
-                        ELSE existing_summary_status
-                    END,
-                    r.description_input_fingerprint = CASE
-                        WHEN existing_summary_status IS NOT NULL
-                         AND merged_descriptions <> existing_descriptions THEN NULL
-                        ELSE r.description_input_fingerprint
-                    END,
-                    r.description_summary_error = CASE
-                        WHEN existing_summary_status IS NOT NULL
-                         AND merged_descriptions <> existing_descriptions THEN NULL
-                        ELSE r.description_summary_error
-                    END,
-                    r.description = CASE
-                        WHEN existing_summary_status IS NULL THEN
-                            reduce(text = '', item IN merged_descriptions |
-                                text + CASE WHEN text = '' THEN '' ELSE '\n' END + item)
-                        ELSE r.description
-                    END,
-                    r.strength = CASE
-                        WHEN row.strength IS NULL THEN r.strength
-                        WHEN r.strength IS NULL OR row.strength > r.strength THEN row.strength
-                        ELSE r.strength
-                    END
                 """,
                 {"relationships": self._relationship_rows(group)},
             )
@@ -208,11 +128,6 @@ class MemgraphGraphWriter(BaseGraphWriter):
             SET c.claim_type = row.claim_type,
                 c.description = row.description,
                 c.status = row.status,
-                c.start_date = row.start_date,
-                c.end_date = row.end_date,
-                c.object_entity_id = row.object_entity_id,
-                c.source_text = row.source_text,
-                c.text_unit_id = row.text_unit_id,
                 c.updated = timestamp(),
                 c.created = coalesce(c.created, timestamp())
             WITH c, row

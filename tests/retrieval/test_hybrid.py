@@ -5,7 +5,7 @@ import pytest
 from recon_graphrag.llm import LLMResponse
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.retrieval.hybrid import HybridEntityRetriever, merge_hybrid_scores
-from recon_graphrag.retrieval.search_local import LocalSearchRetriever
+from recon_graphrag.retrieval.local import LocalSearchRetriever
 
 
 class FakeGraphStore:
@@ -13,14 +13,14 @@ class FakeGraphStore:
         self.calls = []
 
     def vector_search(self, index_name, query_vector, k, label=None, filters=None):
-        self.calls.append(("vector_search", {"index_name": index_name, "k": k, "label": label, "filters": filters}))
+        self.calls.append(("vector_search", {"index_name": index_name, "k": k, "label": label}))
         return [
             {"id": "a", "score": 0.7},
             {"id": "b", "score": 0.5},
         ]
 
     def keyword_search(self, index_name, query_text, k, label=None, filters=None):
-        self.calls.append(("keyword_search", {"index_name": index_name, "k": k, "label": label, "filters": filters}))
+        self.calls.append(("keyword_search", {"index_name": index_name, "k": k, "label": label}))
         return [
             {"id": "a", "score": 1.0},
             {"id": "c", "score": 0.4},
@@ -37,7 +37,6 @@ class FakeGraphStore:
         retrieval_query=None,
         query_params=None,
         mode="local",
-        graph_name=None,
     ):
         params = query_params or {}
         self.calls.append(
@@ -48,7 +47,6 @@ class FakeGraphStore:
                     "retrieval_query": retrieval_query,
                     "query_params": params,
                     "mode": mode,
-                    "graph_name": graph_name,
                 },
             )
         )
@@ -87,9 +85,6 @@ class FakeGraphStore:
                 "excerpt": "Alice directed Inception.",
             }
         ]
-
-    def get_claims_for_entities(self, graph_name, entity_ids):
-        return []
 
 
 class FakeEmbedder:
@@ -185,8 +180,6 @@ async def test_hybrid_entity_retriever_embeds_queries_and_fetches_context():
     keyword_call = [c for c in store.calls if c[0] == "keyword_search"][0]
     assert vector_call[1]["k"] == 6
     assert keyword_call[1]["k"] == 6
-    assert vector_call[1]["filters"] == {"graph_name": "entity-graph"}
-    assert keyword_call[1]["filters"] == {"graph_name": "entity-graph"}
     context_call = [c for c in store.calls if c[0] == "fetch_entity_context"][0]
     assert context_call[1]["matches"] == [
         {"id": "a", "score": 1.0},
@@ -195,7 +188,6 @@ async def test_hybrid_entity_retriever_embeds_queries_and_fetches_context():
     assert context_call[1]["retrieval_query"] == "RETURN node.name AS title, score"
     assert context_call[1]["query_params"] == {"custom": "value"}
     assert context_call[1]["mode"] == "local"
-    assert context_call[1]["graph_name"] == "entity-graph"
     assert result.metadata == {"query_vector": [0.1, 0.2, 0.3]}
 
 
@@ -232,9 +224,29 @@ async def test_local_search_uses_internal_retriever_and_llm():
 
     assert result.mode == "local"
     assert result.answer == "Alice directed Inception."
-    assert "Alice (Person)" in result.context
-    assert "Who directed Inception?" in llm.prompts[0]
-    assert result.metadata.get("mixed_context") is True
+    assert "Finding: Alice (Person)" in result.context
+    assert "Alice directed Inception." in llm.prompts[0]
+    assert result.citations == [
+        Citation(
+            document_id="doc:1",
+            chunk_id="chunk:1",
+            document_name="Doc 1",
+            excerpt="Alice directed Inception.",
+            metadata={
+                "collection": "movies",
+                "source": "row-source",
+                "record_id": "row-42",
+                "document_id": "doc:1",
+                "chunk_id": "chunk:1",
+                "document_name": "Doc 1",
+            },
+        )
+    ]
+    citation_call = [c for c in store.calls if c[0] == "resolve_chunk_citations"][0]
+    assert citation_call[1] == {
+        "graph_name": "entity-graph",
+        "chunk_ids": ["chunk:1"],
+    }
 
 
 @pytest.mark.asyncio
@@ -242,7 +254,7 @@ async def test_local_search_can_include_citation_metadata_in_prompt():
     store = FakeGraphStore()
     embedder = FakeEmbedder()
     llm = FakeLLM()
-    retriever = LocalSearchRetriever(store, llm, embedder, use_mixed_context=False)
+    retriever = LocalSearchRetriever(store, llm, embedder)
 
     result = await retriever.search(
         "Who directed Inception?",
@@ -264,7 +276,7 @@ async def test_local_search_with_synthesize_false_skips_llm():
     store = FakeGraphStore()
     embedder = FakeEmbedder()
     llm = FakeLLM()
-    retriever = LocalSearchRetriever(store, llm, embedder, use_mixed_context=False)
+    retriever = LocalSearchRetriever(store, llm, embedder)
 
     result = await retriever.search(
         "Who directed Inception?",

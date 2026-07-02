@@ -154,10 +154,8 @@ class TestPackItems:
 class TestPipelineConfig:
     def test_default_config(self):
         cfg = PipelineConfig()
-        assert cfg.chunk_size == 1200
-        assert cfg.chunk_overlap == 100
-        assert cfg.max_gleanings == 1
-        assert cfg.use_mixed_context is False
+        assert cfg.chunk_size == 1000
+        assert cfg.chunk_overlap == 200
         assert cfg.token_counter is None
 
     def test_invalid_chunk_size_raises(self):
@@ -166,7 +164,7 @@ class TestPipelineConfig:
 
     def test_invalid_overlap_raises(self):
         with pytest.raises(ValueError):
-            PipelineConfig(chunk_overlap=1200)
+            PipelineConfig(chunk_overlap=1000)
 
     def test_negative_overlap_raises(self):
         with pytest.raises(ValueError):

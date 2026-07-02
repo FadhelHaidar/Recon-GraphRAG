@@ -47,6 +47,12 @@ class IndexManager:
         """Create all required vector and text indexes."""
         self._drop_indexes()
         self.graph_store.create_vector_index(
+            name=self.config.chunk_vector_index,
+            label=self.config.chunk_label,
+            embedding_property="embedding",
+            dimensions=self.embedding_dim,
+        )
+        self.graph_store.create_vector_index(
             name=self.config.entity_vector_index,
             label=self.config.entity_label,
             embedding_property="embedding",
@@ -57,20 +63,14 @@ class IndexManager:
             label=self.config.entity_label,
             node_properties=["name"],
         )
-        self.graph_store.create_vector_index(
-            name=self.config.community_vector_index,
-            label=self.config.community_label,
-            embedding_property=self.config.community_report_embedding_property,
-            dimensions=self.embedding_dim,
-        )
         self._create_constraints()
 
     def _drop_indexes(self):
         """Drop existing indexes so they can be recreated with updated settings."""
         for name in [
+            self.config.chunk_vector_index,
             self.config.entity_vector_index,
             self.config.entity_fulltext_index,
-            self.config.community_vector_index,
         ]:
             try:
                 self.graph_store.execute_query(

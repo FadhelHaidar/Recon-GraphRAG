@@ -69,66 +69,10 @@ class Neo4jGraphStore(BaseGraphStore):
     # ------------------------------------------------------------------
     # Entity resolution
     # ------------------------------------------------------------------
-    async def resolve_entities_exact(
+    async def resolve_entities(
         self,
         graph_name: str = "entity-graph",
-        resolve_property: str = "name",
-        dry_run: bool = False,
-    ) -> dict:
-        from recon_graphrag.graphdb.neo4j.entity_resolution import (
-            _Neo4jEntityResolver,
-        )
-
-        resolver = _Neo4jEntityResolver(self)
-        return await resolver.resolve_exact(
-            graph_name=graph_name,
-            resolve_property=resolve_property,
-            dry_run=dry_run,
-        )
-
-    async def resolve_entities_normalized(
-        self,
-        graph_name: str = "entity-graph",
-        resolve_property: str = "name",
-        dry_run: bool = False,
-    ) -> dict:
-        from recon_graphrag.graphdb.neo4j.entity_resolution import (
-            _Neo4jEntityResolver,
-        )
-
-        resolver = _Neo4jEntityResolver(self)
-        return await resolver.resolve_normalized(
-            graph_name=graph_name,
-            resolve_property=resolve_property,
-            dry_run=dry_run,
-        )
-
-    async def resolve_entities_fuzzy(
-        self,
-        graph_name: str = "entity-graph",
-        resolve_property: str = "name",
-        dry_run: bool = False,
-        merge_threshold: float = 95.0,
-        review_threshold: float = 85.0,
-        max_candidates_per_entity: int = 20,
-    ) -> dict:
-        from recon_graphrag.graphdb.neo4j.entity_resolution import (
-            _Neo4jEntityResolver,
-        )
-
-        resolver = _Neo4jEntityResolver(self)
-        return await resolver.resolve_fuzzy(
-            graph_name=graph_name,
-            resolve_property=resolve_property,
-            dry_run=dry_run,
-            merge_threshold=merge_threshold,
-            review_threshold=review_threshold,
-            max_candidates_per_entity=max_candidates_per_entity,
-        )
-
-    async def resolve_entities_hybrid(
-        self,
-        graph_name: str = "entity-graph",
+        strategy: str = "normalized",
         resolve_property: str = "name",
         dry_run: bool = False,
         merge_threshold: float = 95.0,
@@ -148,8 +92,9 @@ class Neo4jGraphStore(BaseGraphStore):
         )
 
         resolver = _Neo4jEntityResolver(self)
-        return await resolver.resolve_hybrid(
+        return await resolver.resolve(
             graph_name=graph_name,
+            strategy=strategy,
             resolve_property=resolve_property,
             dry_run=dry_run,
             merge_threshold=merge_threshold,
@@ -247,17 +192,13 @@ class Neo4jGraphStore(BaseGraphStore):
         label: Optional[str] = None,
         filters: Optional[dict] = None,
     ) -> list[dict]:
-        filters = filters or {}
-        conditions: list[str] = []
+        label_filter = ""
         if label:
-            conditions.append(f"node:{escape_cypher_identifier(label)}")
-        if filters.get("graph_name") is not None:
-            conditions.append("node.graph_name = $graph_name")
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            label_filter = f"WHERE node:{escape_cypher_identifier(label)}"
         query = f"""
         CALL db.index.vector.queryNodes($index_name, $k, $query_vector)
         YIELD node, score
-        {where_clause}
+        {label_filter}
         RETURN elementId(node) AS id, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -269,7 +210,6 @@ class Neo4jGraphStore(BaseGraphStore):
                 "k": k,
                 "top_k": k,
                 "query_vector": query_vector,
-                "graph_name": filters.get("graph_name"),
             },
         )
 
@@ -281,13 +221,9 @@ class Neo4jGraphStore(BaseGraphStore):
         label: Optional[str] = None,
         filters: Optional[dict] = None,
     ) -> list[dict]:
-        filters = filters or {}
-        conditions: list[str] = []
+        label_filter = ""
         if label:
-            conditions.append(f"node:{escape_cypher_identifier(label)}")
-        if filters.get("graph_name") is not None:
-            conditions.append("node.graph_name = $graph_name")
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            label_filter = f"WHERE node:{escape_cypher_identifier(label)}"
         query = f"""
         CALL db.index.fulltext.queryNodes(
             $index_name,
@@ -295,7 +231,7 @@ class Neo4jGraphStore(BaseGraphStore):
             {{limit: $k}}
         )
         YIELD node, score
-        {where_clause}
+        {label_filter}
         RETURN elementId(node) AS id, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -307,7 +243,6 @@ class Neo4jGraphStore(BaseGraphStore):
                 "query_text": query_text,
                 "k": k,
                 "top_k": k,
-                "graph_name": filters.get("graph_name"),
             },
         )
 
@@ -317,7 +252,6 @@ class Neo4jGraphStore(BaseGraphStore):
         retrieval_query: Optional[str] = None,
         query_params: Optional[dict] = None,
         mode: str = "local",
-        graph_name: str | None = None,
     ) -> list[dict]:
         from recon_graphrag.retrieval.neo4j.queries import (
             DEFAULT_DRIFT_RETRIEVAL_QUERY,
@@ -334,50 +268,14 @@ class Neo4jGraphStore(BaseGraphStore):
         UNWIND $matches AS match
         MATCH (node)
         WHERE elementId(node) = match.id
-          AND ($graph_name IS NULL OR node.graph_name = $graph_name)
         WITH node, match.score AS score
         {retrieval_query}
         """
-        parameters = {"matches": matches, "graph_name": graph_name}
+        parameters = {"matches": matches}
         if query_params:
             for key, value in query_params.items():
                 parameters.setdefault(key, value)
         return self.execute_query(query, parameters)
-
-    def vector_search_community_reports(
-        self,
-        query_vector: list[float],
-        graph_name: str,
-        top_k: int = 3,
-        level: int | None = None,
-    ) -> list[dict]:
-        """Search report vectors with graph/level filtering after over-fetching."""
-        query = """
-        CALL db.index.vector.queryNodes($index_name, $candidate_k, $query_vector)
-        YIELD node AS c, score
-        WHERE c:Community
-          AND c.graph_name = $graph_name
-          AND ($level IS NULL OR c.level = $level)
-        RETURN c.id AS id,
-               c.level AS level,
-               c.report_text AS report_text,
-               coalesce(c.report_json, '') AS report_json,
-               c.rating AS rating,
-               score
-        ORDER BY score DESC
-        LIMIT $top_k
-        """
-        return self.execute_query(
-            query,
-            {
-                "index_name": "community-report-embeddings",
-                "candidate_k": max(top_k * 5, top_k),
-                "top_k": top_k,
-                "query_vector": query_vector,
-                "graph_name": graph_name,
-                "level": level,
-            },
-        )
 
     # ------------------------------------------------------------------
     # Communities
@@ -423,82 +321,6 @@ class Neo4jGraphStore(BaseGraphStore):
         """
         return self.execute_query(query, {"limit": limit})
 
-    def get_entities_needing_summary(
-        self, graph_name: str, limit: int = 500
-    ) -> list[dict]:
-        query = """
-        MATCH (e:__Entity__ {graph_name: $graph_name})
-        WHERE coalesce(e.description_summary_status, '') <> 'success'
-          AND size(coalesce(e.descriptions, [])) > 0
-        RETURN elementId(e) AS id,
-               e.id AS entity_id,
-               coalesce(e.name, e.title, e.id) AS name,
-               coalesce(e.type, last(labels(e))) AS type,
-               e.descriptions AS descriptions
-        LIMIT $limit
-        """
-        return self.execute_query(query, {"graph_name": graph_name, "limit": limit})
-
-    def get_relationships_needing_summary(
-        self, graph_name: str, limit: int = 500
-    ) -> list[dict]:
-        query = """
-        MATCH (source:__Entity__)-[r]->(target:__Entity__)
-        WHERE r.graph_name = $graph_name
-          AND coalesce(r.description_summary_status, '') <> 'success'
-          AND size(coalesce(r.descriptions, [])) > 0
-        RETURN elementId(r) AS id,
-               r.id AS rel_id,
-               coalesce(source.human_readable_id, source.canonical_key, source.id) AS source_id,
-               coalesce(target.human_readable_id, target.canonical_key, target.id) AS target_id,
-               type(r) AS type,
-               r.descriptions AS descriptions
-        LIMIT $limit
-        """
-        return self.execute_query(query, {"graph_name": graph_name, "limit": limit})
-
-    def persist_entity_summaries(
-        self, graph_name: str, summaries: list[dict]
-    ) -> None:
-        if not summaries:
-            return
-        query = """
-        UNWIND $summaries AS row
-        MATCH (e:__Entity__ {graph_name: $graph_name})
-        WHERE elementId(e) = row.id
-        SET e.descriptions = row.descriptions,
-            e.description_summary_status = row.description_summary_status,
-            e.description_input_fingerprint = row.description_input_fingerprint,
-            e.description_summary_updated = row.description_summary_updated,
-            e.description_summary_error = row.description_summary_error,
-            e.description = CASE
-                WHEN row.description IS NULL THEN e.description
-                ELSE row.description
-            END
-        """
-        self.execute_query(query, {"graph_name": graph_name, "summaries": summaries})
-
-    def persist_relationship_summaries(
-        self, graph_name: str, summaries: list[dict]
-    ) -> None:
-        if not summaries:
-            return
-        query = """
-        UNWIND $summaries AS row
-        MATCH ()-[r]->()
-        WHERE r.graph_name = $graph_name AND elementId(r) = row.id
-        SET r.descriptions = row.descriptions,
-            r.description_summary_status = row.description_summary_status,
-            r.description_input_fingerprint = row.description_input_fingerprint,
-            r.description_summary_updated = row.description_summary_updated,
-            r.description_summary_error = row.description_summary_error,
-            r.description = CASE
-                WHEN row.description IS NULL THEN r.description
-                ELSE row.description
-            END
-        """
-        self.execute_query(query, {"graph_name": graph_name, "summaries": summaries})
-
     def get_community_ranked_context(
         self,
         graph_name: str,
@@ -514,7 +336,7 @@ class Neo4jGraphStore(BaseGraphStore):
             {"graph_name": graph_name, "cid": community_id, "level": level},
         )
 
-    def get_child_community_reports(
+    def get_community_child_summary_context(
         self,
         graph_name: str,
         community_id: str,
@@ -522,11 +344,11 @@ class Neo4jGraphStore(BaseGraphStore):
         child_level: int,
     ) -> list[dict]:
         from recon_graphrag.retrieval.neo4j.queries import (
-            COMMUNITY_CHILD_REPORT_QUERY,
+            COMMUNITY_CHILD_SUMMARY_QUERY,
         )
 
         return self.execute_query(
-            COMMUNITY_CHILD_REPORT_QUERY,
+            COMMUNITY_CHILD_SUMMARY_QUERY,
             {
                 "graph_name": graph_name,
                 "cid": community_id,
@@ -535,19 +357,33 @@ class Neo4jGraphStore(BaseGraphStore):
             },
         )
 
-    def get_community_reports_by_keys(
+    def get_community_summaries_by_keys(
         self,
         graph_name: str,
         keys: list[dict],
         top_k: int,
     ) -> list[dict]:
         from recon_graphrag.retrieval.neo4j.queries import (
-            COMMUNITY_REPORTS_BY_KEY_QUERY,
+            DRIFT_COMMUNITY_SUMMARIES_QUERY,
         )
 
         return self.execute_query(
-            COMMUNITY_REPORTS_BY_KEY_QUERY,
+            DRIFT_COMMUNITY_SUMMARIES_QUERY,
             {"keys": keys, "graph_name": graph_name, "top_k": top_k},
+        )
+
+    def get_community_entities_by_keys(
+        self,
+        graph_name: str,
+        keys: list[dict],
+    ) -> list[dict]:
+        from recon_graphrag.retrieval.neo4j.queries import (
+            DRIFT_COMMUNITY_ENTITIES_QUERY,
+        )
+
+        return self.execute_query(
+            DRIFT_COMMUNITY_ENTITIES_QUERY,
+            {"keys": keys, "graph_name": graph_name},
         )
 
     # ------------------------------------------------------------------

@@ -55,9 +55,9 @@ store.create_indexes(IndexConfig(), embedding_dim=1536)
 
 The indexes created are:
 
+- `chunk-embeddings` — vector index on `Chunk.embedding`
 - `entity-embeddings` — vector index on `__Entity__.embedding`
 - `entity-names` — fulltext index on `__Entity__.name`
-- `community-report-embeddings` — vector index on `Community.report_embedding`
 
 Use the backend-specific `IndexManager.verify()` to print the created indexes and node/relationship counts.
 
@@ -151,7 +151,7 @@ You can also ingest multiple documents or paginated sources with `build_from_doc
 
 ## 6. Build communities
 
-`CommunityPipeline` detects hierarchical communities and generates structured reports:
+`CommunityPipeline` detects hierarchical communities and generates summaries:
 
 ```python
 from recon_graphrag import CommunityPipeline
@@ -159,48 +159,45 @@ from recon_graphrag import CommunityPipeline
 community = CommunityPipeline(
     graph_store=store,
     llm=llm,
-    embedder=embedder,          # enables report embeddings for DRIFT search
     relationship_types=["DIRECTED"],
 )
 
 await community.build()
 ```
 
-`relationship_types` tells the pipeline which relationships form the community
-structure. The `embedder` parameter generates vector embeddings for each
-community report, which DRIFT search uses for its primer phase. Without it,
-DRIFT falls back to local-style entity search.
+`relationship_types` tells the pipeline which relationships form the community structure. Choose types that create meaningful connections between entities.
 
 ---
 
 ## 7. Search the graph
 
-Recon-GraphRAG provides three search classes — `LocalSearchRetriever`,
-`GlobalSearchRetriever`, and `DriftSearchRetriever` — each with its own
-constructor and search method:
+`GraphRAG` provides three search modes:
 
 ```python
-from recon_graphrag import LocalSearchRetriever, GlobalSearchRetriever, DriftSearchRetriever
+from recon_graphrag import GraphRAG
+
+graph_rag = GraphRAG(store, llm, embedder)
 
 # Specific question about an entity
-local_search = LocalSearchRetriever(store, llm, embedder)
-local_result = await local_search.search(
+local_result = await graph_rag.search(
     "Who directed Inception?",
+    mode="local",
     top_k=10,
 )
 
-# Broad overview using community reports
-global_search = GlobalSearchRetriever(store, llm)
-global_result = await global_search.search(
+# Broad overview using community summaries
+global_result = await graph_rag.search(
     "What are the main themes?",
+    mode="global",
     community_level="coarsest",
 )
 
 # Hybrid detail + context
-drift_search = DriftSearchRetriever(store, llm, embedder)
-drift_result = await drift_search.search(
+drift_result = await graph_rag.search(
     "Tell me about Christopher Nolan's work.",
+    mode="drift",
     top_k=10,
+    community_top_k=3,
 )
 ```
 
@@ -222,8 +219,7 @@ for source in local_result.sources:
 ingestion, so it can carry page numbers, database row IDs, API object IDs,
 ticket IDs, list-item IDs, or other source-specific keys.
 
-> **Community levels:** `level=0` means the **coarsest / most global**
-> communities. Higher levels are finer. See [Search](06-search.md).
+> **Note on community levels:** In Recon-GraphRAG, `level=0` means the **finest / most local** communities. This is the opposite of some Microsoft GraphRAG descriptions. See [Search](06-search.md) for details.
 
 ---
 
@@ -234,7 +230,7 @@ Here is the full script in one block:
 ```python
 from neo4j import GraphDatabase
 from recon_graphrag import (
-    LocalSearchRetriever,
+    GraphRAG,
     GraphBuilderPipeline,
     CommunityPipeline,
     Neo4jGraphStore,
@@ -291,14 +287,13 @@ await pipeline.build_from_text("Christopher Nolan directed Inception.")
 community = CommunityPipeline(
     graph_store=store,
     llm=llm,
-    embedder=embedder,
     relationship_types=["DIRECTED"],
 )
 await community.build()
 
 # Search
-local_search = LocalSearchRetriever(store, llm, embedder)
-result = await local_search.search("What are the key findings?", top_k=10)
+graph_rag = GraphRAG(store, llm, embedder)
+result = await graph_rag.search("What are the key findings?", mode="local")
 print(result.answer)
 ```
 

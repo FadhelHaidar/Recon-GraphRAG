@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from recon_graphrag.utils.tokens import TokenCounter
+
+@runtime_checkable
+class TokenCounter(Protocol):
+    """Minimal protocol for token counting (matches utils.tokens.TokenCounter)."""
+
+    def count(self, text: str) -> int: ...
+    def truncate(self, text: str, max_tokens: int) -> str: ...
 
 
 @dataclass
