@@ -1,0 +1,4 @@
+# Keep CODEOWNERS changes owned by the repository owner.
+.github/CODEOWNERS @FadhelHaidar
+
+* @FadhelHaidar
