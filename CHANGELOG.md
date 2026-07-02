@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.6.2...v0.7.0) (2026-07-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove summary field, use_reports parameter, summary_prompt parameter, store_community_summary method, get_community_summaries_by_keys, get_community_entities_by_keys, community_top_k search parameter, level alias for community_level in global search, ReindexRequiredError, and schema version tracking. Default chunk_size changed from 1000 to 1200, chunk_overlap from 200 to 100, max_gleanings from 0 to 1.
+
+### Features
+
+* hybrid entity-resolution with LLM rescue, concurrent extraction, and GraphRAG-aligned retrieval ([#60](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/60)) ([2ea8dc7](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/2ea8dc7ce26b4f5290dda8f1964fabb4f940cecd))
+
+
+### Bug Fixes
+
+* **tests:** align index manager vector index count with dropped chunk index ([#61](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/61)) ([86fc27b](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/86fc27b4abd2bad25e43baa3e928459ff9a07353))
+
 ## [0.6.2](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.6.1...v0.6.2) (2026-06-28)
 
 
