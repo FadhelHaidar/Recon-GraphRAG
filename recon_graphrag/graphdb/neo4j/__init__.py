@@ -2,7 +2,6 @@
 
 __all__ = [
     "Neo4jGraphStore",
-    "Neo4jGraphWriter",
     "IndexManager",
     "CommunityDetector",
 ]
@@ -13,10 +12,6 @@ def __getattr__(name: str):
         from recon_graphrag.graphdb.neo4j.store import Neo4jGraphStore
 
         return Neo4jGraphStore
-    if name == "Neo4jGraphWriter":
-        from recon_graphrag.pipelines.neo4j.writer import Neo4jGraphWriter
-
-        return Neo4jGraphWriter
     if name == "IndexManager":
         from recon_graphrag.graphdb.neo4j.index_manager import IndexManager
 

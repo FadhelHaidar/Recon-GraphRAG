@@ -29,7 +29,7 @@ class StatefulFakeGraphStore:
     """Minimal in-memory graph store that simulates writer MERGE/SET behavior.
 
     This is intentionally narrow: it understands the Cypher shape emitted by
-    ``Neo4jGraphWriter`` and ``MemgraphGraphWriter`` well enough to test
+    ``CypherGraphWriter`` well enough to test
     cross-document aggregation and graph-name scoping. It is not a general
     Cypher interpreter.
     """

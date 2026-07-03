@@ -58,10 +58,8 @@ These tests may be slower, flaky if external services are unhealthy, and may inc
 | `tests/graphdb/neo4j/test_neo4j_index_manager.py` | No | No | No | Neo4j index manager and resolver-wrapper behavior. |
 | `tests/graphdb/neo4j/test_neo4j_store.py` | No | No | No | Neo4j store query construction using fake driver/session objects. |
 | `tests/graphdb/memgraph/` | Fake only | Fake only | No | Memgraph store, index, and entity-resolution behavior using fakes. |
-| `tests/pipelines/neo4j/test_neo4j_writer.py` | No | No | No | Shared graph-writer contract against the Neo4j writer. |
-| `tests/pipelines/memgraph/test_memgraph_writer.py` | No | No | No | The same graph-writer contract against the Memgraph writer. |
 | `tests/pipelines/test_graph_builder.py` | Fake only | Fake only | No | Pipeline orchestration with fake LLM, fake embedder, fake graph store, and fake writer. |
-| `tests/pipelines/test_writer_characterization.py` | No | No | No | Shared `BaseGraphWriter` behavior across backends. |
+| `tests/pipelines/test_writer_characterization.py` | No | No | No | `CypherGraphWriter` MERGE/aggregation behavior. |
 | `tests/graphdb/test_store_base.py` | No | No | No | Shared `BaseGraphStore` helpers and read helpers. |
 | `tests/graphdb/test_entity_resolution_contract.py` | No | No | No | Shared `BaseEntityResolver` normalization contract. |
 | `tests/communities/` | No | Fake only | No | Shared, Neo4j, and Memgraph community behavior using fakes. |
