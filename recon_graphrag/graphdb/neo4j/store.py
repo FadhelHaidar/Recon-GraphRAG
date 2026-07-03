@@ -327,8 +327,10 @@ class Neo4jGraphStore(BaseGraphStore):
         if retrieval_query is None:
             if mode == "drift":
                 retrieval_query = DEFAULT_DRIFT_RETRIEVAL_QUERY
-            else:
+            elif mode == "local":
                 retrieval_query = DEFAULT_LOCAL_RETRIEVAL_QUERY
+            else:
+                raise ValueError(f"mode must be 'local' or 'drift', got {mode!r}")
 
         query = f"""
         UNWIND $matches AS match
