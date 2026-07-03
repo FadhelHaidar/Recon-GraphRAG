@@ -152,6 +152,41 @@ class TestTopKRelationships:
         assert uncapped.count("rel_") == 20
         assert capped.count("rel_") == 5
 
+    def test_truncation_keeps_highest_weight_relationships(self):
+        """Truncation ranks parallel relationship_records by weight first."""
+        items = [
+            RetrievalItem(content={
+                "title": "Alice",
+                "relationships": ["weak", "strong", "medium"],
+                "relationship_records": [
+                    {"weight": 1.0},
+                    {"weight": 9.0},
+                    {"weight": 5.0},
+                ],
+                "source_text": [],
+                "source_chunk_ids": [],
+            })
+        ]
+        result = RetrievalResult(items=items)
+        output = _format_entity_context(result, top_k_relationships=2)
+        assert "strong" in output
+        assert "medium" in output
+        assert "weak" not in output
+
+    def test_citation_metadata_rendered_once(self):
+        """Citation metadata block appears once, not per entity section."""
+        from recon_graphrag.models.artifacts import Citation
+
+        items = [
+            RetrievalItem(content={"title": f"E{i}", "relationships": [],
+                                   "source_text": [], "source_chunk_ids": []})
+            for i in range(3)
+        ]
+        result = RetrievalResult(items=items)
+        citations = [Citation(document_id="d1", chunk_id="c1", metadata={"page": 1})]
+        output = _format_entity_context(result, citations=citations)
+        assert output.count("Citation metadata:") == 1
+
     def test_format_entity_context_none_means_no_cap(self):
         """top_k_relationships=None preserves all relationships."""
         items = [

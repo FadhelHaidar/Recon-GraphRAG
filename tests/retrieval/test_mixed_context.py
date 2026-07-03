@@ -154,6 +154,37 @@ class TestMixedContextBuilder:
         assert "c0" in result.included_community_ids
         assert "claim:1" in result.included_claim_ids
 
+    def test_queries_match_all_entity_id_forms(self):
+        """entity_matches carry human-readable ids while e.id is a UUID; the
+        community and text-unit queries must match on every id form."""
+
+        class IdFormStore(FakeGraphStore):
+            def execute_query(self, query, parameters=None):
+                if "IN_COMMUNITY" in query:
+                    assert "e.human_readable_id = eid" in query
+                    assert "e.canonical_key = eid" in query
+                if "linked_entities" in query:
+                    assert "e.human_readable_id" in query
+                return super().execute_query(query, parameters)
+
+        store = IdFormStore()
+        builder = MixedContextBuilder(store, graph_name="entity-graph")
+        result = builder.build_context(
+            entity_matches=[{"id": "a", "score": 0.8}],
+            entity_context_rows=[
+                {
+                    "title": "Alice (Person)",
+                    "entity_id": "a",
+                    "relationships": [],
+                    "source_text": [],
+                    "source_chunk_ids": ["chunk:1"],
+                    "score": 0.8,
+                }
+            ],
+            token_budget=12000,
+        )
+        assert "c0" in result.included_community_ids
+
     def test_build_context_resolves_citations(self):
         store = FakeGraphStore()
         builder = MixedContextBuilder(store, graph_name="entity-graph")

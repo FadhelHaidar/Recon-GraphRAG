@@ -251,6 +251,49 @@ async def test_neo4j_resolver_fuzzy_produces_review_candidate():
 
 
 @pytest.mark.asyncio
+async def test_neo4j_resolver_fuzzy_merges_more_than_two_variants_in_one_group():
+    # Three variants of one person that all match the anchor above the merge
+    # threshold must collapse into a single group, not just an isolated pair.
+    rows = [
+        {
+            "node_id": "4:a",
+            "entity_id": "e1",
+            "graph_name": "g1",
+            "resolve_value": "Jonathan Smith",
+            "labels": ["__Entity__", "Person"],
+            "properties": {},
+        },
+        {
+            "node_id": "4:b",
+            "entity_id": "e2",
+            "graph_name": "g1",
+            "resolve_value": "Jonathan Smithe",
+            "labels": ["__Entity__", "Person"],
+            "properties": {},
+        },
+        {
+            "node_id": "4:c",
+            "entity_id": "e3",
+            "graph_name": "g1",
+            "resolve_value": "Jonathan Smyth",
+            "labels": ["__Entity__", "Person"],
+            "properties": {},
+        },
+    ]
+    store = FakeGraphStore(apoc_available=True, rows=rows)
+    resolver = _Neo4jEntityResolver(store)
+    entities = resolver._load_entities("g1", "name")
+    groups, review_groups, _ = resolver._build_fuzzy_groups(
+        entities,
+        merge_threshold=90.0,
+        review_threshold=80.0,
+        max_candidates_per_entity=20,
+    )
+    assert len(groups) == 1
+    assert {e.node_id for e in groups[0]} == {"4:a", "4:b", "4:c"}
+
+
+@pytest.mark.asyncio
 async def test_neo4j_resolver_fuzzy_does_not_merge_short_different_names():
     rows = [
         {

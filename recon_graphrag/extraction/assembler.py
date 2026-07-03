@@ -128,6 +128,10 @@ class GraphDocumentAssembler:
                 else:
                     existing = relationships_by_key[key]
                     existing.observation_count += 1
+                    # ponytail: strength is first-observation-wins within a doc.
+                    # Inert while Leiden weights by `weight` (frequency); switch
+                    # to max(existing.strength, this weight) if `strength` ever
+                    # becomes the community/retrieval weight property.
                     existing.properties["weight"] = float(existing.observation_count)
                     existing.properties.setdefault("source_chunk_ids", []).append(
                         chunk.id

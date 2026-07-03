@@ -344,6 +344,11 @@ class MixedContextBuilder:
         entity_matches: list[dict],
         entity_context_rows: list[dict],
     ) -> list[EntityCandidate]:
+        rows_by_id = {
+            str(row.get("entity_id", "")): row
+            for row in entity_context_rows
+            if row.get("entity_id")
+        }
         entities: list[EntityCandidate] = []
         seen: set[str] = set()
         for match in entity_matches:
@@ -351,31 +356,19 @@ class MixedContextBuilder:
             if eid in seen:
                 continue
             seen.add(eid)
+            row = rows_by_id.get(eid, {})
+            labels = row.get("entity_labels", []) or []
             entities.append(
                 EntityCandidate(
                     id=eid,
-                    name="",
-                    label="Entity",
-                    description="",
+                    name=row.get("entity_name", "") or (eid if row else ""),
+                    label=next(
+                        (label for label in labels if label != "__Entity__"), "Entity"
+                    ),
+                    description=row.get("entity_description", "") or "",
                     score=float(match.get("score", 0.0)),
                 )
             )
-        # Enrich from the typed context contract.
-        for row in entity_context_rows:
-            row_id = str(row.get("entity_id", ""))
-            if row_id:
-                for e in entities:
-                    if e.id != row_id:
-                        continue
-                    labels = row.get("entity_labels", []) or []
-                    object.__setattr__(e, "name", row.get("entity_name", "") or row_id)
-                    object.__setattr__(
-                        e,
-                        "label",
-                        next((label for label in labels if label != "__Entity__"), "Entity"),
-                    )
-                    object.__setattr__(e, "description", row.get("entity_description", ""))
-                continue
         return entities
 
     def _collect_relationships(
@@ -428,7 +421,9 @@ class MixedContextBuilder:
             UNWIND $chunk_ids AS cid
             MATCH (c:Chunk {id: cid, graph_name: $graph_name})
             OPTIONAL MATCH (c)-[:FROM_CHUNK]->(e:__Entity__ {graph_name: $graph_name})
-            WITH c, collect(DISTINCT e.id) AS linked_entities
+            WITH c, collect(DISTINCT coalesce(
+                e.human_readable_id, e.canonical_key, e.id
+            )) AS linked_entities
             RETURN c.id AS chunk_id,
                    c.text AS text,
                    linked_entities
@@ -471,7 +466,7 @@ class MixedContextBuilder:
             UNWIND $entity_ids AS eid
             MATCH (e:__Entity__ {graph_name: $graph_name})-[:IN_COMMUNITY]->
                   (c:Community {graph_name: $graph_name, level: $level})
-            WHERE e.id = eid
+            WHERE e.id = eid OR e.canonical_key = eid OR e.human_readable_id = eid
             WITH DISTINCT c
             WHERE c.report_text <> ''
             RETURN c.id AS community_id,

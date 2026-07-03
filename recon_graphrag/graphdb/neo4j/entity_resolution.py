@@ -8,7 +8,7 @@ from recon_graphrag.graphdb.entity_resolution import (
     _first_property_value,
     _normalize_name,
 )
-from recon_graphrag.graphdb.neo4j.cypher import escape_cypher_identifier
+from recon_graphrag.graphdb.cypher import escape_cypher_identifier
 
 
 class _Neo4jEntityResolver(BaseEntityResolver):
@@ -111,7 +111,8 @@ class _Neo4jEntityResolver(BaseEntityResolver):
                 SET node.{escape_cypher_identifier(resolve_property)} = $canonical_name,
                     node.id = $canonical_entity_id,
                     node.canonical_key = coalesce($canonical_key, node.canonical_key),
-                    node.human_readable_id = coalesce($canonical_readable_id, node.human_readable_id)
+                    node.human_readable_id = coalesce($canonical_readable_id, node.human_readable_id),
+                    node.embedding = null
                 RETURN elementId(node) AS merged_id
                 """,
                 {

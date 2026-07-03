@@ -54,6 +54,18 @@ class FakeGraphStore:
     def backfill_descriptions(self):
         pass
 
+    def get_entities_needing_summary(self, graph_name, limit=500):
+        return []
+
+    def get_relationships_needing_summary(self, graph_name, limit=500):
+        return []
+
+    def persist_entity_summaries(self, graph_name, summaries):
+        pass
+
+    def persist_relationship_summaries(self, graph_name, summaries):
+        pass
+
     async def resolve_entities_exact(self, **kwargs):
         return {"skipped": True, "reason": "disabled in test"}
 

@@ -113,7 +113,7 @@ def __getattr__(name: str):
 
         return Neo4jGraphStore
     if name == "IndexManager":
-        from recon_graphrag.graphdb.neo4j.index_manager import IndexManager
+        from recon_graphrag.graphdb.index_manager import IndexManager
 
         return IndexManager
     if name == "MemgraphGraphStore":

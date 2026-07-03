@@ -139,15 +139,17 @@ def resolve_relationship_citations(
         return []
 
     query = """
-    UNWIND $relationship_keys AS relationship_key
     MATCH (source:__Entity__ {graph_name: $graph_name})-[r]->
           (target:__Entity__ {graph_name: $graph_name})
-    WITH r, relationship_key,
+    WITH r,
          coalesce(source.human_readable_id, source.canonical_key, source.id)
            + ':' + type(r) + ':'
            + coalesce(target.human_readable_id, target.canonical_key, target.id)
          AS endpoint_key
-    WHERE relationship_key IN [r.human_readable_id, r.canonical_key, r.id, endpoint_key]
+    WHERE r.human_readable_id IN $relationship_keys
+       OR r.canonical_key IN $relationship_keys
+       OR r.id IN $relationship_keys
+       OR endpoint_key IN $relationship_keys
     UNWIND coalesce(r.source_chunk_ids, []) AS chunk_id
     RETURN DISTINCT chunk_id
     """

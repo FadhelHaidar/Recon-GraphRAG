@@ -27,11 +27,11 @@ def create_llm(provider: str, **kwargs: Any) -> BaseLLM:
         **kwargs: Passed to the underlying provider adapter.
     """
     providers = {
-        "openai": _create_openai_llm,
+        "openai": OpenAIChatLLM,
         "azure_openai": _create_azure_openai_llm,
-        "ollama": _create_ollama_llm,
+        "ollama": OllamaLLM,
         "openrouter": _create_openrouter_llm,
-        "anthropic": _create_anthropic_llm,
+        "anthropic": AnthropicLLM,
     }
     if provider not in providers:
         raise ValueError(
@@ -159,19 +159,11 @@ class OllamaLLM:
         return _ollama_chat_response_to_llm_response(response)
 
 
-def _create_openai_llm(**kwargs: Any) -> BaseLLM:
-    return OpenAIChatLLM(**kwargs)
-
-
 def _create_azure_openai_llm(**kwargs: Any) -> BaseLLM:
     deployment_name = kwargs.get("azure_deployment") or kwargs.get("model_name")
     if deployment_name:
         kwargs.setdefault("azure_deployment", deployment_name)
     return OpenAIChatLLM(azure=True, **kwargs)
-
-
-def _create_ollama_llm(**kwargs: Any) -> BaseLLM:
-    return OllamaLLM(**kwargs)
 
 
 def _create_openrouter_llm(**kwargs: Any) -> BaseLLM:
@@ -232,10 +224,6 @@ class AnthropicLLM:
         async_close = getattr(self.async_client, "close", None)
         if callable(async_close):
             await async_close()
-
-
-def _create_anthropic_llm(**kwargs: Any) -> BaseLLM:
-    return AnthropicLLM(**kwargs)
 
 
 def _openai_chat_response_to_llm_response(response: Any) -> LLMResponse:

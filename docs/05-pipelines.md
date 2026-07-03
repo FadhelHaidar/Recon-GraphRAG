@@ -329,6 +329,7 @@ community = CommunityPipeline(
     skip_existing=False,        # skip unchanged community reports
     max_context_tokens=8000,    # token budget for community context
     token_counter=None,         # token counter for context packing
+    max_report_words=2000,      # soft word limit in the report prompt
 )
 ```
 
@@ -365,6 +366,7 @@ result = await community.build(level=0)
 | `skip_existing` | Skip community reports whose input fingerprint has not changed. |
 | `max_context_tokens` | Maximum tokens for community context passed to the LLM. Degree-ranked context is greedily packed to fit this budget. Defaults to `8000`. Set to `None` to include all context without budgeting. |
 | `token_counter` | Token counter for context packing. Defaults to `ApproximateTokenCounter` when `max_context_tokens` is set. |
+| `max_report_words` | Soft word limit stated in the report prompt. Defaults to `2000`. Set to `None` to omit the instruction and let only the LLM's `max_tokens` bound report length. |
 | `embedder` | Embedder used to create report vectors after generation. |
 | `embed_community_reports` | Generate report vectors during `build()`; defaults to `True`. |
 

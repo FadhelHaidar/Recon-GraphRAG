@@ -104,6 +104,64 @@ class TextChunker:
         counter = self.token_counter
         assert counter is not None  # guarded by __init__ validation
 
+        # Fast path for real tokenizers (e.g. tiktoken): encode once and slice
+        # token IDs. The truncate-based fallback re-encodes the whole remaining
+        # tail every iteration (O(n^2) for exact tokenizers).
+        if hasattr(counter, "encode") and hasattr(counter, "decode"):
+            return self._chunk_by_token_ids(counter, text, document_id, metadata)
+        return self._chunk_by_token_truncate(counter, text, document_id, metadata)
+
+    def _chunk_by_token_ids(
+        self,
+        counter: TokenCounter,
+        text: str,
+        document_id: str,
+        metadata: dict,
+    ) -> list[TextChunk]:
+        token_ids = counter.encode(text)
+        total_tokens = len(token_ids)
+        if total_tokens == 0:
+            return []
+
+        step = self.chunk_size - self.chunk_overlap
+        chunks: list[TextChunk] = []
+        char_start = 0
+        index = 0
+
+        for token_start in range(0, total_tokens, step):
+            token_end = min(token_start + self.chunk_size, total_tokens)
+            chunk_text = counter.decode(token_ids[token_start:token_end])
+            if chunk_text.strip():
+                chunks.append(
+                    TextChunk(
+                        id=f"{document_id}:chunk:{index}",
+                        text=chunk_text,
+                        index=index,
+                        metadata={
+                            **metadata,
+                            "char_start": char_start,
+                            "char_end": char_start + len(chunk_text),
+                            "token_start": token_start,
+                            "token_end": token_end,
+                        },
+                    )
+                )
+                index += 1
+
+            if token_end >= total_tokens:
+                break
+            # Advance char cursor by the decoded step slice (cheap: step tokens).
+            char_start += len(counter.decode(token_ids[token_start:token_start + step]))
+
+        return chunks
+
+    def _chunk_by_token_truncate(
+        self,
+        counter: TokenCounter,
+        text: str,
+        document_id: str,
+        metadata: dict,
+    ) -> list[TextChunk]:
         total_tokens = counter.count(text)
         if total_tokens == 0:
             return []

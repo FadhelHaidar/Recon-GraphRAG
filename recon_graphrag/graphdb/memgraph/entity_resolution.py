@@ -8,7 +8,7 @@ from recon_graphrag.graphdb.entity_resolution import (
     _first_property_value,
     _normalize_name,
 )
-from recon_graphrag.graphdb.memgraph.cypher import escape_cypher_identifier
+from recon_graphrag.graphdb.cypher import escape_cypher_identifier
 
 
 class _MemgraphEntityResolver(BaseEntityResolver):
@@ -89,6 +89,10 @@ class _MemgraphEntityResolver(BaseEntityResolver):
 
             combined_props = self._combine_properties(node_ids)
             combined_props["id"] = canonical_entity_id
+            # Drop any (now-stale, possibly corrupted) merged embedding so the
+            # embedding step re-embeds the merged node from its consolidated
+            # description. SET n += {embedding: null} removes the property.
+            combined_props["embedding"] = None
             if canonical_key:
                 combined_props["canonical_key"] = canonical_key
             if canonical_readable_id:
@@ -132,6 +136,9 @@ class _MemgraphEntityResolver(BaseEntityResolver):
         return merged_nodes
 
     def _combine_properties(self, node_ids: list[int]) -> dict:
+        # Union semantics matching Neo4j apoc.refactor.mergeNodes({properties:'combine'}):
+        # conflicting scalar values across merged nodes collapse into a list, so a
+        # custom scalar prop (e.g. occupation) can become multi-valued after a merge.
         rows = self.graph_store.execute_query(
             """
             MATCH (n)

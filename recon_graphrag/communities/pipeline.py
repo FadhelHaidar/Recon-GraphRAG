@@ -37,6 +37,7 @@ class CommunityPipeline:
         skip_existing: bool = False,
         max_context_tokens: int = 8000,
         token_counter: TokenCounter | None = None,
+        max_report_words: int | None = 2000,
         embedder: BaseEmbedder | None = None,
         embed_community_reports: bool = True,
     ):
@@ -63,6 +64,8 @@ class CommunityPipeline:
                 this budget. When None, all context is included.
             token_counter: Token counter for context packing. Defaults to
                 ApproximateTokenCounter when max_context_tokens is set.
+            max_report_words: Soft word limit stated in the report prompt.
+                None omits the instruction.
             embedder: Embedder for community report vector embeddings.
                 When provided and embed_community_reports=True, generates
                 report embeddings after generation.
@@ -84,6 +87,7 @@ class CommunityPipeline:
         self.skip_existing = skip_existing
         self.max_context_tokens = max_context_tokens
         self.token_counter = token_counter
+        self.max_report_words = max_report_words
         self.embedder = embedder
         self.embed_community_reports = embed_community_reports
 
@@ -132,6 +136,7 @@ class CommunityPipeline:
             concurrency=self.summarize_concurrency,
             max_context_tokens=self.max_context_tokens,
             token_counter=self.token_counter,
+            max_report_words=self.max_report_words,
         )
 
         for lvl in levels:

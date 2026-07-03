@@ -167,31 +167,11 @@ class TiktokenTokenCounter:
         encoded = self._encoding.encode(text)
         return self._encoding.decode(encoded[:max_tokens])
 
+    def encode(self, text: str) -> list[int]:
+        return self._encoding.encode(text)
 
-def create_token_counter(name: str = "approximate", **kwargs) -> TokenCounter:
-    """Factory for token counters.
-
-    Supported names:
-    - ``"approximate"``: ``ApproximateTokenCounter`` (always available).
-      Accepts ``ratio``.
-    - ``"tiktoken"``: ``TiktokenTokenCounter`` (uses ``tiktoken``).
-      Accepts ``model`` (defaults to ``"cl100k_base"``).
-    """
-    if name == "approximate":
-        return ApproximateTokenCounter(**kwargs)
-    if name == "tiktoken":
-        return TiktokenTokenCounter(**kwargs)
-    raise ValueError(f"Unknown token counter: {name!r}")
-
-
-def count_tokens(text: str, counter: TokenCounter | None = None) -> int:
-    """Convenience helper: count tokens in ``text``."""
-    return (counter or ApproximateTokenCounter()).count(text)
-
-
-def truncate_text(text: str, max_tokens: int, counter: TokenCounter | None = None) -> str:
-    """Convenience helper: truncate ``text`` to ``max_tokens``."""
-    return (counter or ApproximateTokenCounter()).truncate(text, max_tokens)
+    def decode(self, tokens: list[int]) -> str:
+        return self._encoding.decode(tokens)
 
 
 __all__ = [
@@ -200,8 +180,5 @@ __all__ = [
     "PackItem",
     "PackResult",
     "TiktokenTokenCounter",
-    "create_token_counter",
-    "count_tokens",
     "pack_items",
-    "truncate_text",
 ]

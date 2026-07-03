@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     import neo4j
 
 from recon_graphrag.extraction.types import GraphDocument
-from recon_graphrag.graphdb.memgraph.cypher import (
+from recon_graphrag.graphdb.cypher import (
     cypher_string_literal,
     escape_cypher_identifier,
 )
@@ -368,8 +368,10 @@ class MemgraphGraphStore(BaseGraphStore):
         if retrieval_query is None:
             if mode == "drift":
                 retrieval_query = DEFAULT_DRIFT_RETRIEVAL_QUERY
-            else:
+            elif mode == "local":
                 retrieval_query = DEFAULT_LOCAL_RETRIEVAL_QUERY
+            else:
+                raise ValueError(f"mode must be 'local' or 'drift', got {mode!r}")
 
         query = f"""
         UNWIND $matches AS match

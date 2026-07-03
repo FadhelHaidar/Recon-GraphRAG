@@ -74,12 +74,21 @@ _EXTRACTION_RESPONSE = json.dumps({
 def _make_fake_llm():
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=MagicMock(content=_EXTRACTION_RESPONSE))
+    llm.aclose = AsyncMock()
     return llm
+
+
+# Memgraph's vector index is global per label+property (not scoped by
+# graph_name), so this fake embedder must use the same dimension as every
+# other integration test or CREATE VECTOR INDEX collides with leftover
+# embeddings from a prior test on the shared :__Entity__ label.
+_FAKE_EMBED_DIM = 1536
 
 
 def _make_fake_embedder():
     embedder = MagicMock()
-    embedder.async_embed_query = AsyncMock(return_value=[0.1] * 64)
+    embedder.async_embed_query = AsyncMock(return_value=[0.1] * _FAKE_EMBED_DIM)
+    embedder.aclose = AsyncMock()
     return embedder
 
 
@@ -132,7 +141,7 @@ async def _run_deterministic_workflow(store, graph_name: str):
     embedder = _make_fake_embedder()
 
     try:
-        IndexManager(store, embedding_dim=64).create_indexes()
+        IndexManager(store, embedding_dim=_FAKE_EMBED_DIM).create_indexes()
 
         builder = GraphBuilderPipeline(
             graph_store=store,
@@ -142,12 +151,12 @@ async def _run_deterministic_workflow(store, graph_name: str):
             graph_name=graph_name,
             perform_entity_resolution=False,
         )
-        build_result = (await builder.build_from_text(
+        build_result = await builder.build_from_text(
             "Alice Rivera works at Acme Security. Acme Security operates the Sentinel monitoring system.",
             metadata={"source": f"{graph_name}-source", "collection": "workflow-test"},
             chunk_size=500,
             chunk_overlap=50,
-        ))[0]
+        )
 
         validation = build_result.get("validation", {})
         for key in ("chunk_count", "entity_count", "evidence_link_count", "entity_relationship_count"):

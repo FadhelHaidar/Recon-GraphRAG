@@ -14,7 +14,7 @@ from typing import Optional
 
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
-from recon_graphrag.graphdb.memgraph.cypher import (
+from recon_graphrag.graphdb.cypher import (
     escape_cypher_identifier,
 )
 from recon_graphrag.models.types import IndexConfig

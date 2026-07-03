@@ -117,7 +117,29 @@ class GraphBuilderPipeline:
 
         Steps 4-5 must be run separately via CommunityPipeline.
         """
-        metadata = metadata or {}
+        return await self._ingest_text(
+            text=text,
+            metadata=metadata or {},
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            chunk_unit=chunk_unit,
+            token_counter=token_counter,
+            token_encoding=token_encoding,
+            finalize=True,
+        )
+
+    async def _ingest_text(
+        self,
+        text: str,
+        metadata: dict,
+        *,
+        chunk_size: int,
+        chunk_overlap: int,
+        chunk_unit: str,
+        token_counter: TokenCounter | None,
+        token_encoding: str,
+        finalize: bool,
+    ) -> dict:
         document_id = self._make_document_id(text=text, metadata=metadata)
         text_hash = self._hash_text(text)
         print(f"Starting graph build from text: document_id={document_id} chars={len(text)}")
@@ -140,6 +162,7 @@ class GraphBuilderPipeline:
             text_hash=text_hash,
             chunks=chunks,
             metadata=metadata,
+            finalize=finalize,
         )
 
         print(f"Graph build complete: document_id={document_id}")
@@ -171,11 +194,15 @@ class GraphBuilderPipeline:
 
         semaphore = asyncio.Semaphore(self.document_concurrency)
 
+        # Extract + write each document concurrently. Whole-graph finalization
+        # (resolution, summarization, embedding) runs once afterward instead of
+        # once per document, which would rescan the whole graph N times and race
+        # when document_concurrency > 1.
         async def _build_one(envelope: dict) -> dict:
             async with semaphore:
                 metadata = envelope.get("metadata") or {}
                 if "text" in envelope:
-                    return await self.build_from_text(
+                    return await self._ingest_text(
                         text=envelope["text"],
                         metadata=metadata,
                         chunk_size=chunk_size,
@@ -183,18 +210,25 @@ class GraphBuilderPipeline:
                         chunk_unit=chunk_unit,
                         token_counter=token_counter,
                         token_encoding=token_encoding,
+                        finalize=False,
                     )
                 return await self._build_from_pages_envelope(
                     pages=envelope["pages"],
                     metadata=metadata,
                     window_size=window_size,
                     window_overlap=window_overlap,
+                    finalize=False,
                 )
 
         tasks = [
             asyncio.create_task(_build_one(envelope)) for envelope in documents
         ]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+
+        validation = await self._finalize_graph()
+        for result in results:
+            result["validation"] = validation
+        return results
 
     async def _build_from_pages_envelope(
         self,
@@ -202,6 +236,7 @@ class GraphBuilderPipeline:
         metadata: dict,
         window_size: int,
         window_overlap: int,
+        finalize: bool = True,
     ) -> dict:
         text = "\n\n".join(_page_text(page) for page in pages)
         document_id = self._make_document_id(text=text, metadata=metadata)
@@ -235,6 +270,7 @@ class GraphBuilderPipeline:
             text_hash=text_hash,
             chunks=chunks,
             metadata=metadata,
+            finalize=finalize,
         )
 
         print(f"Graph build complete: document_id={document_id}")
@@ -289,6 +325,7 @@ class GraphBuilderPipeline:
         text_hash: str,
         chunks: list,
         metadata: dict,
+        finalize: bool = True,
     ) -> dict:
         extraction = await self._extract_and_write_chunks(
             document_id=document_id,
@@ -297,6 +334,17 @@ class GraphBuilderPipeline:
             metadata=metadata,
         )
 
+        result = {"extraction": extraction}
+        if finalize:
+            result["validation"] = await self._finalize_graph()
+        return result
+
+    async def _finalize_graph(self) -> dict:
+        """Run whole-graph post-processing after all documents are written.
+
+        Operates over the entire graph (scoped by graph_name), so it must run
+        once per build batch, not once per document.
+        """
         print("Backfilling missing entity descriptions")
         self._backfill_descriptions()
 
@@ -305,22 +353,23 @@ class GraphBuilderPipeline:
             await self._resolve_entities()
 
         if self.summarize_descriptions:
+            summarizer = DescriptionSummarizer(
+                self.llm,
+                self.graph_store,
+                self.graph_name,
+                concurrency=self.summarization_concurrency,
+            )
             print("Summarizing entity descriptions")
-            await self._summarize_entity_descriptions()
+            await summarizer.summarize_entities(limit=self.summarization_limit)
             print("Summarizing relationship descriptions")
-            await self._summarize_relationship_descriptions()
+            await summarizer.summarize_relationships(limit=self.summarization_limit)
 
         if self.embed_entity_nodes:
             print("Embedding entity nodes")
             await self._embed_entities()
 
         print("Validating graph build")
-        validation = self._validate_graph_build()
-
-        return {
-            "extraction": extraction,
-            "validation": validation,
-        }
+        return self._validate_graph_build()
 
     async def _extract_and_write_chunks(
         self,
@@ -488,24 +537,6 @@ class GraphBuilderPipeline:
             print(f"Entity embedding failed: {e}")
             if self.fail_on_embedding_error:
                 raise
-
-    async def _summarize_entity_descriptions(self) -> None:
-        summarizer = DescriptionSummarizer(
-            self.llm,
-            self.graph_store,
-            self.graph_name,
-            concurrency=self.summarization_concurrency,
-        )
-        await summarizer.summarize_entities(limit=self.summarization_limit)
-
-    async def _summarize_relationship_descriptions(self) -> None:
-        summarizer = DescriptionSummarizer(
-            self.llm,
-            self.graph_store,
-            self.graph_name,
-            concurrency=self.summarization_concurrency,
-        )
-        await summarizer.summarize_relationships(limit=self.summarization_limit)
 
     def _validate_graph_build(self) -> dict:
         return self.graph_store.validate_graph_build()

@@ -27,10 +27,10 @@ def create_embedder(
 ) -> BaseEmbedder:
     """Create an embedder instance for a supported provider."""
     providers = {
-        "openai": _create_openai_embedder,
+        "openai": OpenAIEmbeddings,
         "azure_openai": _create_azure_openai_embedder,
-        "ollama": _create_ollama_embedder,
-        "sentence-transformer": _create_sentence_transformer_embedder,
+        "ollama": OllamaEmbeddings,
+        "sentence-transformer": SentenceTransformerEmbeddings,
         "openrouter": _create_openrouter_embedder,
     }
     if provider not in providers:
@@ -139,23 +139,11 @@ class SentenceTransformerEmbeddings:
         return await asyncio.to_thread(self.embed_query, text, **kwargs)
 
 
-def _create_openai_embedder(**kwargs: Any) -> BaseEmbedder:
-    return OpenAIEmbeddings(**kwargs)
-
-
 def _create_azure_openai_embedder(**kwargs: Any) -> BaseEmbedder:
     deployment_name = kwargs.get("azure_deployment") or kwargs.get("model")
     if deployment_name:
         kwargs.setdefault("azure_deployment", deployment_name)
     return OpenAIEmbeddings(azure=True, **kwargs)
-
-
-def _create_ollama_embedder(**kwargs: Any) -> BaseEmbedder:
-    return OllamaEmbeddings(**kwargs)
-
-
-def _create_sentence_transformer_embedder(**kwargs: Any) -> BaseEmbedder:
-    return SentenceTransformerEmbeddings(**kwargs)
 
 
 def _create_openrouter_embedder(**kwargs: Any) -> BaseEmbedder:
