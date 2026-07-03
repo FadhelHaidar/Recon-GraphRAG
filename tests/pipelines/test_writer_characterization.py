@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from recon_graphrag.pipelines.memgraph.writer import MemgraphGraphWriter
-from recon_graphrag.pipelines.neo4j.writer import Neo4jGraphWriter
+from recon_graphrag.pipelines.writer import CypherGraphWriter
 from tests.pipelines.writer_scenarios import (
     StatefulFakeGraphStore,
     make_entity_graph_document,
@@ -13,9 +12,9 @@ from tests.pipelines.writer_scenarios import (
 )
 
 
-@pytest.fixture(params=[Neo4jGraphWriter, MemgraphGraphWriter], ids=["neo4j", "memgraph"])
-def writer_cls(request):
-    return request.param
+@pytest.fixture
+def writer_cls():
+    return CypherGraphWriter
 
 
 def test_entity_merge_replaces_properties(writer_cls):

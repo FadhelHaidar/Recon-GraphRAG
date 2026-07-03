@@ -13,7 +13,7 @@ from recon_graphrag.graphdb.cypher import (
 )
 from recon_graphrag.graphdb.neo4j.index_manager import IndexManager
 from recon_graphrag.models.types import IndexConfig
-from recon_graphrag.pipelines.neo4j.writer import Neo4jGraphWriter
+from recon_graphrag.pipelines.writer import CypherGraphWriter
 from recon_graphrag.graphdb.store_base import BaseGraphStore
 
 
@@ -50,7 +50,7 @@ class Neo4jGraphStore(BaseGraphStore):
     # Write
     # ------------------------------------------------------------------
     def write_graph_document(self, graph_document: GraphDocument) -> dict:
-        writer = Neo4jGraphWriter(self)
+        writer = CypherGraphWriter(self)
         return writer.write_graph_document(graph_document)
 
     # ------------------------------------------------------------------

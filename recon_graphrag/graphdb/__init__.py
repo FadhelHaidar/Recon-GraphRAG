@@ -8,8 +8,6 @@ __all__ = [
     "Neo4jGraphStore",
     "MemgraphGraphStore",
     "IndexManager",
-    "Neo4jGraphWriter",
-    "MemgraphGraphWriter",
 ]
 
 
@@ -26,12 +24,4 @@ def __getattr__(name: str):
         from recon_graphrag.graphdb.memgraph.store import MemgraphGraphStore
 
         return MemgraphGraphStore
-    if name == "Neo4jGraphWriter":
-        from recon_graphrag.pipelines.neo4j.writer import Neo4jGraphWriter
-
-        return Neo4jGraphWriter
-    if name == "MemgraphGraphWriter":
-        from recon_graphrag.pipelines.memgraph.writer import MemgraphGraphWriter
-
-        return MemgraphGraphWriter
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

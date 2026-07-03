@@ -1,26 +1,45 @@
-"""Memgraph graph writer implementation.
+"""Cypher graph writer shared by all Cypher-compatible backends.
 
-Maps the neutral GraphDocument into Memgraph using Cypher MERGE queries.
+Maps the neutral GraphDocument into the graph using Cypher MERGE queries. The
+Cypher is identical across Neo4j and Memgraph, so a single writer serves both;
+backend dialect differences live in the graph store, not here.
+
+Preserves the graph shape expected by retrieval, embedding, and community
+detection:
+
+- (:Document)
+- (:Chunk)
+- (:Chunk)-[:PART_OF]->(:Document)
+- (:Chunk)-[:FROM_CHUNK]->(:__Entity__)
+- (:__Entity__:DomainLabel)
+- (:__Entity__)-[:DOMAIN_RELATIONSHIP]->(:__Entity__)
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
+from typing import Any
+
+from recon_graphrag.extraction.types import GraphDocument
+from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.graphdb.cypher import escape_cypher_identifier
-from recon_graphrag.pipelines.writer_base import BaseGraphWriter
 
 
-class MemgraphGraphWriter(BaseGraphWriter):
-    """Write GraphDocument records to Memgraph.
+class CypherGraphWriter:
+    """Write GraphDocument records to a Cypher graph store."""
 
-    Preserves the graph shape expected by retrieval, embedding, and community detection:
+    def __init__(self, graph_store: GraphStore):
+        self.graph_store = graph_store
 
-    - (:Document)
-    - (:Chunk)
-    - (:Chunk)-[:PART_OF]->(:Document)
-    - (:Chunk)-[:FROM_CHUNK]->(:__Entity__)
-    - (:__Entity__:DomainLabel)
-    - (:__Entity__)-[:DOMAIN_RELATIONSHIP]->(:__Entity__)
-    """
+    def write_graph_document(self, graph_document: GraphDocument) -> dict[str, int]:
+        self._write_documents([graph_document.document])
+        self._write_chunks(graph_document.chunks)
+        self._write_entities(graph_document.entities)
+        self._write_evidence_links(graph_document.evidence_links)
+        self._write_relationships(graph_document.relationships)
+        self._write_claims(graph_document.claims)
+
+        return self._stats_for(graph_document)
 
     def _write_documents(self, documents: list) -> None:
         if not documents:
@@ -224,3 +243,115 @@ class MemgraphGraphWriter(BaseGraphWriter):
             """,
             {"claims": self._claim_rows(claims)},
         )
+
+    def _stats_for(self, graph_document: GraphDocument) -> dict[str, int]:
+        return {
+            "documents": 1,
+            "chunks": len(graph_document.chunks),
+            "entities": len(graph_document.entities),
+            "relationships": len(graph_document.relationships),
+            "evidence_links": len(graph_document.evidence_links),
+            "claims": len(graph_document.claims),
+        }
+
+    def _document_rows(self, documents: list) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": doc.id,
+                "text_hash": doc.text_hash,
+                "graph_name": doc.graph_name,
+                "metadata": doc.metadata,
+            }
+            for doc in documents
+        ]
+
+    def _chunk_rows(self, chunks: list) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": chunk.id,
+                "document_id": chunk.document_id,
+                "text": chunk.text,
+                "index": chunk.index,
+                "graph_name": chunk.graph_name,
+                "metadata": chunk.metadata,
+            }
+            for chunk in chunks
+        ]
+
+    def _entity_rows(self, entities: list) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for entity in entities:
+            properties = dict(entity.properties)
+            description = properties.pop("description", "") or ""
+            rows.append(
+                {
+                    "id": entity.id,
+                    "type": entity.type,
+                    "graph_name": entity.graph_name,
+                    "canonical_key": entity.canonical_key,
+                    "human_readable_id": entity.human_readable_id,
+                    "description": description,
+                    "properties": properties,
+                }
+            )
+        return rows
+
+    def _evidence_link_rows(self, links: list) -> list[dict[str, Any]]:
+        return [
+            {
+                "chunk_id": link.chunk_id,
+                "entity_id": link.entity_id,
+                "graph_name": link.graph_name,
+            }
+            for link in links
+        ]
+
+    def _relationship_rows(self, relationships: list) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for rel in relationships:
+            properties = dict(rel.properties)
+            source_chunk_ids = properties.pop("source_chunk_ids", []) or []
+            properties.pop("observation_count", None)
+            properties.pop("weight", None)
+            if rel.strength is not None:
+                properties.pop("strength", None)
+            observation_count = max(rel.observation_count, len(set(source_chunk_ids)), 1)
+            rows.append(
+                {
+                    "id": rel.id,
+                    "source_id": rel.source_id,
+                    "target_id": rel.target_id,
+                    "graph_name": rel.graph_name,
+                    "source_chunk_ids": list(dict.fromkeys(source_chunk_ids)),
+                    "observation_count": observation_count,
+                    "weight": float(observation_count),
+                    "strength": rel.strength,
+                    "properties": properties,
+                }
+            )
+        return rows
+
+    def _claim_rows(self, claims: list) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": claim.id,
+                "entity_id": claim.entity_id,
+                "chunk_id": claim.source.chunk_id,
+                "claim_type": claim.claim_type,
+                "description": claim.description,
+                "status": claim.status,
+                "start_date": claim.start_date,
+                "end_date": claim.end_date,
+                "object_entity_id": claim.object_entity_id,
+                "source_text": claim.source_text,
+                "text_unit_id": claim.text_unit_id,
+                "graph_name": claim.graph_name,
+            }
+            for claim in claims
+        ]
+
+    def _group_by_type(self, records: list) -> dict[str, list]:
+        grouped: dict[str, list] = defaultdict(list)
+        for record in records:
+            grouped[record.type].append(record)
+        return dict(grouped)

@@ -196,13 +196,13 @@ class BaseLLM(Protocol):
 **`ABC`** — subclasses inherit shared logic and override abstract methods:
 
 ```python
-class BaseGraphWriter(ABC):
-    def write_graph_document(self, graph_document):  # shared logic
-        self._write_documents(...)
+class BaseEntityResolver(ABC):
+    async def resolve(self, ...):  # shared logic
+        entities = self._load_entities(...)
         ...
 
     @abstractmethod
-    def _write_documents(self, documents):  # backend-specific
+    def _load_entities(self, ...):  # backend-specific
         ...
 ```
 
@@ -215,7 +215,7 @@ class BaseGraphWriter(ABC):
 | `BaseLLM` | `Protocol` | Plugin interface, no shared code |
 | `BaseEmbedder` | `Protocol` | Plugin interface, no shared code |
 | `TokenCounter` | `Protocol` | Utility contract, no shared code |
-| `BaseGraphWriter` | `ABC` | Template method with 50+ lines of shared row preparation |
+| `CypherGraphWriter` | Concrete | Single Cypher writer shared by all Cypher backends; no subclassing |
 | `BaseEntityResolver` | `ABC` | Template method with shared resolution/fuzzy/LLM logic |
 | `BaseRetriever` | `Protocol` | Single abstract method, no shared code |
 
