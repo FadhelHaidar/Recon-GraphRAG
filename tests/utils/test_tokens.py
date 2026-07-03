@@ -8,11 +8,7 @@ from recon_graphrag.config.settings import PipelineConfig
 from recon_graphrag.utils.tokens import (
     ApproximateTokenCounter,
     PackItem,
-    TiktokenTokenCounter,
-    count_tokens,
-    create_token_counter,
     pack_items,
-    truncate_text,
 )
 
 
@@ -67,42 +63,6 @@ def math_ceil(value: float) -> int:
     import math
 
     return math.ceil(value)
-
-
-class TestCreateTokenCounter:
-    def test_create_approximate(self):
-        counter = create_token_counter("approximate")
-        assert isinstance(counter, ApproximateTokenCounter)
-
-    def test_create_approximate_with_ratio(self):
-        counter = create_token_counter("approximate", ratio=3.0)
-        assert counter.count("abc") == 1
-
-    def test_create_unknown_raises(self):
-        with pytest.raises(ValueError):
-            create_token_counter("unknown")
-
-    def test_create_tiktoken(self):
-        counter = create_token_counter("tiktoken")
-        assert isinstance(counter, TiktokenTokenCounter)
-
-    def test_create_tiktoken_with_encoding(self):
-        counter = create_token_counter("tiktoken", model="cl100k_base")
-        assert isinstance(counter, TiktokenTokenCounter)
-        # "hello world" is two tokens in cl100k_base
-        assert counter.count("hello world") == 2
-
-    def test_create_tiktoken_unknown_encoding_raises(self):
-        with pytest.raises(ImportError):
-            create_token_counter("tiktoken", model="unknown-encoding-xyz")
-
-
-class TestConvenienceFunctions:
-    def test_count_tokens_default_counter(self):
-        assert count_tokens("abcdefgh") == 2  # default ratio 4
-
-    def test_truncate_text_default_counter(self):
-        assert truncate_text("abcdefghij", 2) == "abcdefgh"
 
 
 class TestPackItems:

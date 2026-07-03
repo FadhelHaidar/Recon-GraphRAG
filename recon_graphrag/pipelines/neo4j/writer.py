@@ -5,7 +5,7 @@ Maps neutral GraphDocument into Neo4j using Cypher MERGE queries.
 
 from __future__ import annotations
 
-from recon_graphrag.graphdb.neo4j.cypher import escape_cypher_identifier
+from recon_graphrag.graphdb.cypher import escape_cypher_identifier
 from recon_graphrag.pipelines.writer_base import BaseGraphWriter
 
 

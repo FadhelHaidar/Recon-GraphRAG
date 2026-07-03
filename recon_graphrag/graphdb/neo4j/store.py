@@ -7,7 +7,7 @@ from typing import Optional
 import neo4j
 
 from recon_graphrag.extraction.types import GraphDocument
-from recon_graphrag.graphdb.neo4j.cypher import (
+from recon_graphrag.graphdb.cypher import (
     cypher_string_literal,
     escape_cypher_identifier,
 )

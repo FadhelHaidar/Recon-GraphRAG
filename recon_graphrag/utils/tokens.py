@@ -174,40 +174,11 @@ class TiktokenTokenCounter:
         return self._encoding.decode(tokens)
 
 
-def create_token_counter(name: str = "approximate", **kwargs) -> TokenCounter:
-    """Factory for token counters.
-
-    Supported names:
-    - ``"approximate"``: ``ApproximateTokenCounter`` (always available).
-      Accepts ``ratio``.
-    - ``"tiktoken"``: ``TiktokenTokenCounter`` (uses ``tiktoken``).
-      Accepts ``model`` (defaults to ``"cl100k_base"``).
-    """
-    if name == "approximate":
-        return ApproximateTokenCounter(**kwargs)
-    if name == "tiktoken":
-        return TiktokenTokenCounter(**kwargs)
-    raise ValueError(f"Unknown token counter: {name!r}")
-
-
-def count_tokens(text: str, counter: TokenCounter | None = None) -> int:
-    """Convenience helper: count tokens in ``text``."""
-    return (counter or ApproximateTokenCounter()).count(text)
-
-
-def truncate_text(text: str, max_tokens: int, counter: TokenCounter | None = None) -> str:
-    """Convenience helper: truncate ``text`` to ``max_tokens``."""
-    return (counter or ApproximateTokenCounter()).truncate(text, max_tokens)
-
-
 __all__ = [
     "TokenCounter",
     "ApproximateTokenCounter",
     "PackItem",
     "PackResult",
     "TiktokenTokenCounter",
-    "create_token_counter",
-    "count_tokens",
     "pack_items",
-    "truncate_text",
 ]

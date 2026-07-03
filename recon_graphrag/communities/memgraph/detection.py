@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from recon_graphrag.graphdb.base import GraphStore
-from recon_graphrag.graphdb.memgraph.cypher import (
+from recon_graphrag.graphdb.cypher import (
     escape_cypher_identifier,
 )
 

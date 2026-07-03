@@ -8,7 +8,7 @@ from recon_graphrag.graphdb.entity_resolution import (
     _first_property_value,
     _normalize_name,
 )
-from recon_graphrag.graphdb.neo4j.cypher import escape_cypher_identifier
+from recon_graphrag.graphdb.cypher import escape_cypher_identifier
 
 
 class _Neo4jEntityResolver(BaseEntityResolver):

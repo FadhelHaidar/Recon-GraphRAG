@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     import neo4j
 
 from recon_graphrag.extraction.types import GraphDocument
-from recon_graphrag.graphdb.memgraph.cypher import (
+from recon_graphrag.graphdb.cypher import (
     cypher_string_literal,
     escape_cypher_identifier,
 )
