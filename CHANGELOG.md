@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.2](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.1...v0.7.2) (2026-07-03)
+
+
+### Bug Fixes
+
+* entity resolution, retrieval normalization, and graph store consolidation ([#71](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/71)) ([21a2167](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/21a2167ff0022d58713d8602140860d107caa444))
+
+
+### Documentation
+
+* make README more appealing as an open source project ([#69](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/69)) ([3e8de5c](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/3e8de5caa3ee237cd551fdba3978a7bc689dd386))
+
 ## [0.7.1](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.0...v0.7.1) (2026-07-02)
 
 
