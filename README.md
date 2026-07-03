@@ -183,8 +183,8 @@ For a step-by-step walkthrough, see [docs/02-quickstart.md](docs/02-quickstart.m
 | Provider | LLM | Embeddings | Notes |
 |---|---|---|---|
 | OpenAI | ✅ | ✅ | Default, recommended |
-| Anthropic | ✅ | — | `pip install recon-graphrag[anthropic]` |
-| Ollama | ✅ | ✅ | `pip install recon-graphrag[ollama]` |
+| Anthropic | ✅ | — | `uv add "recon-graphrag[anthropic] @ git+https://github.com/FadhelHaidar/Recon-GraphRAG.git"` |
+| Ollama | ✅ | ✅ | `uv add "recon-graphrag[ollama] @ git+https://github.com/FadhelHaidar/Recon-GraphRAG.git"` |
 | Sentence Transformers | — | ✅ | Local embeddings, no API key needed |
 | OpenRouter | ✅ | — | Via OpenAI-compatible interface |
 
