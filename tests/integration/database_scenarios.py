@@ -112,6 +112,60 @@ async def assert_normalized_entity_resolution(store, graph_name: str) -> None:
     assert entity_count(store, graph_name) == 1
 
 
+async def assert_resolution_keeps_list_source_chunk_ids(
+    store, graph_name: str
+) -> None:
+    """Regression for source_chunk_ids collapsing to a scalar on merge.
+
+    Two duplicate entities that each hold a same-type edge to the same neighbour,
+    both extracted from a single shared chunk, produce two identical one-element
+    ``source_chunk_ids`` lists. ``apoc.refactor.mergeNodes(properties: 'combine')``
+    dedupes those to one value and unwraps the list into a scalar string, which
+    the resolver's own ``apoc.coll.flatten`` (and downstream list consumers) then
+    reject. The resolver must keep the property a list.
+    """
+    store.execute_query(
+        """
+        CREATE (a:__Entity__:Organization {
+            id: $a, graph_name: $g, name: 'Acme Corp', description: ''
+        })
+        CREATE (b:__Entity__:Organization {
+            id: $b, graph_name: $g, name: 'acme corp', description: ''
+        })
+        CREATE (c:__Entity__:Quote {
+            id: $c, graph_name: $g, name: 'Q009', description: ''
+        })
+        CREATE (a)-[:OFFERED {source_chunk_ids: ['chunk-1']}]->(c)
+        CREATE (b)-[:OFFERED {source_chunk_ids: ['chunk-1']}]->(c)
+        """,
+        {
+            "a": f"{graph_name}:acme-a",
+            "b": f"{graph_name}:acme-b",
+            "c": f"{graph_name}:quote",
+            "g": graph_name,
+        },
+    )
+
+    result = await store.resolve_entities_normalized(graph_name=graph_name)
+    assert result["skipped"] is False
+    assert result["merged_groups"] == 1
+
+    rows = store.execute_query(
+        """
+        MATCH (:__Entity__ {graph_name: $g})-[r:OFFERED]->
+              (:__Entity__ {graph_name: $g})
+        RETURN apoc.meta.cypher.type(r.source_chunk_ids) AS ptype,
+               r.source_chunk_ids AS chunks
+        """,
+        {"g": graph_name},
+    )
+    assert len(rows) == 1, f"expected one merged OFFERED edge, got {len(rows)}"
+    assert "LIST" in rows[0]["ptype"], (
+        "source_chunk_ids collapsed to a scalar after merge: "
+        f"{rows[0]['chunks']!r}"
+    )
+
+
 async def assert_hybrid_alias_dry_run(store, graph_name: str) -> None:
     seed_entities(
         store,

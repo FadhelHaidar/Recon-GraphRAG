@@ -126,6 +126,24 @@ class _Neo4jEntityResolver(BaseEntityResolver):
             if result:
                 merged_nodes += len(node_ids)
                 merged_id = result[0].get("merged_id")
+                if merged_id:
+                    # apoc.refactor.mergeNodes(properties: 'combine') collapses a
+                    # single-valued list property into a scalar: when two duplicate
+                    # relationships each carry the same one-element source_chunk_ids
+                    # (a shared edge extracted from a single chunk), 'combine' dedupes
+                    # to one value and unwraps the list. Downstream list consumers
+                    # (the flatten below, retrieval, and the graph writer) all assume
+                    # a list, so re-wrap any scalar left on the merged node's rels.
+                    self.graph_store.execute_query(
+                        """
+                        MATCH (n)-[r]-() WHERE elementId(n) = $node_id
+                          AND r.source_chunk_ids IS NOT NULL
+                          AND NOT apoc.meta.cypher.type(r.source_chunk_ids)
+                              CONTAINS 'LIST'
+                        SET r.source_chunk_ids = [r.source_chunk_ids]
+                        """,
+                        {"node_id": merged_id},
+                    )
                 summary = self._merge_summaries.get(canonical_entity_id)
                 if merged_id and summary:
                     self.graph_store.execute_query(
@@ -140,7 +158,7 @@ class _Neo4jEntityResolver(BaseEntityResolver):
                         MATCH (n)-[r]-()
                         WITH r,
                              apoc.coll.toSet(apoc.coll.flatten(
-                               coalesce(r.source_chunk_ids, [])
+                               apoc.convert.toList(r.source_chunk_ids)
                              )) AS chunks,
                              apoc.coll.toSet(
                                coalesce(r.descriptions, []) +
