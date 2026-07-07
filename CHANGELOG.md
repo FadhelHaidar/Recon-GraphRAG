@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.2...v0.7.3) (2026-07-07)
+
+
+### Bug Fixes
+
+* **entity-resolution:** re-wrap scalar source_chunk_ids collapsed by apoc mergeNodes ([#75](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/75)) ([6cc6548](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/6cc6548cda8247c1fd2a31636dacc6be394a4466))
+
 ## [0.7.2](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.1...v0.7.2) (2026-07-03)
 
 
