@@ -9,6 +9,7 @@ from tests.integration.database_scenarios import (
     assert_hybrid_ai_review,
     assert_hybrid_alias_dry_run,
     assert_normalized_entity_resolution,
+    assert_resolution_keeps_list_source_chunk_ids,
     cleanup_graph,
 )
 from tests.integration.support import (
@@ -54,6 +55,12 @@ def neo4j_store():
 @pytest.mark.database
 async def test_neo4j_normalized_entity_resolution_merges_real_nodes(neo4j_store):
     await assert_normalized_entity_resolution(neo4j_store, GRAPH_NAME)
+
+
+@pytest.mark.integration
+@pytest.mark.database
+async def test_neo4j_resolution_keeps_list_source_chunk_ids(neo4j_store):
+    await assert_resolution_keeps_list_source_chunk_ids(neo4j_store, GRAPH_NAME)
 
 
 @pytest.mark.integration
