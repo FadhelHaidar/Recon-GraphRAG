@@ -1224,7 +1224,7 @@ wheels = [
 
 [[package]]
 name = "recon-graphrag"
-version = "0.7.2"
+version = "0.7.3"
 source = { editable = "." }
 dependencies = [
     { name = "neo4j" },
@@ -1232,6 +1232,7 @@ dependencies = [
     { name = "rapidfuzz" },
     { name = "sentence-transformers" },
     { name = "tiktoken" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -1274,6 +1275,7 @@ requires-dist = [
     { name = "rapidfuzz", specifier = ">=3.0" },
     { name = "sentence-transformers", specifier = ">=5.4.1" },
     { name = "tiktoken", specifier = ">=0.8" },
+    { name = "tqdm", specifier = ">=4.66" },
 ]
 provides-extras = ["anthropic", "ollama", "all", "evaluation", "dev"]
 

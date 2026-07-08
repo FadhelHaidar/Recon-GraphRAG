@@ -7,6 +7,8 @@ import hashlib
 import json
 import time
 
+from tqdm.asyncio import tqdm_asyncio
+
 from recon_graphrag.extraction.parser import DescriptionSummaryParser
 from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.graphdb.base import GraphStore
@@ -71,7 +73,7 @@ class DescriptionSummarizer:
             fingerprints = {item["id"]: fingerprint(item) for item in candidates}
             try:
                 summaries = await self._summary_payload(
-                    candidates, fingerprints, prompt
+                    candidates, fingerprints, prompt, label
                 )
                 persist(self.graph_name, summaries)
             except Exception as exc:
@@ -96,7 +98,11 @@ class DescriptionSummarizer:
             batches += 1
 
     async def _summary_payload(
-        self, items: list[dict], fingerprints: dict[str, str], prompt_builder
+        self,
+        items: list[dict],
+        fingerprints: dict[str, str],
+        prompt_builder,
+        label: str = "item",
     ) -> list[dict]:
         semaphore = asyncio.Semaphore(self.concurrency)
 
@@ -114,7 +120,11 @@ class DescriptionSummarizer:
                     "description_summary_error": None,
                 }
 
-        return await asyncio.gather(*[_summarize(item) for item in items])
+        return await tqdm_asyncio.gather(
+            *[_summarize(item) for item in items],
+            desc=f"Summarizing {label} descriptions",
+            disable=None,
+        )
 
     def _build_entity_summary_prompt(self, entity: dict) -> str:
         return self.prompts.build_entity_summary_prompt(

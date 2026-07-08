@@ -7,9 +7,15 @@ the graph for semantic retrieval by DRIFT search.
 from __future__ import annotations
 
 import asyncio
+import logging
+
+from tqdm.asyncio import tqdm_asyncio
 
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
+
+logger = logging.getLogger(__name__)
+
 
 class CommunityReportEmbedder:
     """Generate and store vector embeddings for community reports."""
@@ -45,21 +51,25 @@ class CommunityReportEmbedder:
             if not reports:
                 break
 
-            async def _embed(
-                report: dict,
-            ) -> tuple[str, int, list[float]] | None:
+            # Returns the exception on failure so tqdm_asyncio.gather (no
+            # return_exceptions=) still lets the caller sort ok/failed results.
+            async def _embed(report: dict):
                 text = self._report_to_text(report)
                 if not text:
                     return None
                 async with semaphore:
-                    embedding = await self.embedder.async_embed_query(text)
-                if not embedding:
-                    raise ValueError("embedder returned an empty vector")
-                return report["id"], int(report["level"]), embedding
+                    try:
+                        embedding = await self.embedder.async_embed_query(text)
+                        if not embedding:
+                            raise ValueError("embedder returned an empty vector")
+                        return report["id"], int(report["level"]), embedding
+                    except Exception as e:
+                        return e
 
-            results = await asyncio.gather(
+            results = await tqdm_asyncio.gather(
                 *[_embed(r) for r in reports],
-                return_exceptions=True,
+                desc="Embedding reports",
+                disable=None,
             )
 
             ids: list[str] = []
@@ -69,13 +79,15 @@ class CommunityReportEmbedder:
             for report, result in zip(reports, results):
                 if isinstance(result, Exception):
                     rid = report.get("id", "?")
-                    print(f"  Error embedding community report '{rid}': {result}")
+                    logger.warning(
+                        "error embedding community report '%s': %s", rid, result
+                    )
                     try:
                         self._mark_failed(report, str(result))
                     except Exception as mark_error:
-                        print(
-                            f"  Error recording embedding failure for '{rid}': "
-                            f"{mark_error}"
+                        logger.warning(
+                            "error recording embedding failure for '%s': %s",
+                            rid, mark_error,
                         )
                         return total
                 elif result is not None:
@@ -93,9 +105,9 @@ class CommunityReportEmbedder:
                 total += len(ids)
 
         if total == 0:
-            print("  All community reports already have embeddings.")
+            logger.info("all community reports already have embeddings")
         else:
-            print(f"  Embedded {total} community reports.")
+            logger.info("embedded %s community reports", total)
 
         return total
 

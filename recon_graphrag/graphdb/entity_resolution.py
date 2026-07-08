@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from rapidfuzz import fuzz
+from tqdm.asyncio import tqdm_asyncio
 
 from recon_graphrag.graphdb.entity_resolution_context import (
     blocked_review_group,
@@ -371,7 +372,9 @@ class BaseEntityResolver(ABC):
             entity_id, observations = _collect_observations(group)
             tasks.append(asyncio.create_task(_summarize(entity_id, observations)))
 
-        results = await asyncio.gather(*tasks)
+        results = await tqdm_asyncio.gather(
+            *tasks, desc="Consolidating merged descriptions", disable=None
+        )
         return {entity_id: summary for entity_id, summary in results}
 
     def _preflight(self, *, dry_run: bool) -> dict | None:
@@ -793,7 +796,9 @@ class BaseEntityResolver(ABC):
             return rg
 
         tasks = [asyncio.create_task(_score(rg)) for rg in review_groups]
-        return await asyncio.gather(*tasks)
+        return await tqdm_asyncio.gather(
+            *tasks, desc="Scoring candidates (embeddings)", disable=None
+        )
 
     def _rescue_dropped_pairs(
         self,
@@ -883,7 +888,9 @@ class BaseEntityResolver(ABC):
             return rg
 
         tasks = [asyncio.create_task(_review(rg)) for rg in review_groups]
-        return await asyncio.gather(*tasks)
+        return await tqdm_asyncio.gather(
+            *tasks, desc="Reviewing candidates (LLM)", disable=None
+        )
 
     @staticmethod
     def _build_llm_review_prompt(

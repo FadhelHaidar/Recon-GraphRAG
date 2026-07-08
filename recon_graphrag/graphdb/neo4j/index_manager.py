@@ -6,6 +6,7 @@ entity resolution to merge duplicate entities.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from recon_graphrag.embeddings.base import BaseEmbedder
@@ -13,6 +14,8 @@ from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.graphdb.cypher import escape_cypher_identifier
 from recon_graphrag.graphdb.neo4j.entity_resolution import _Neo4jEntityResolver
 from recon_graphrag.models.types import IndexConfig
+
+logger = logging.getLogger(__name__)
 
 
 class IndexManager:
@@ -85,7 +88,7 @@ class IndexManager:
                 """
             )
         except Exception as e:
-            print(f"  Warning: community uniqueness constraint failed: {e}")
+            logger.warning("community uniqueness constraint failed: %s", e)
 
     async def resolve_entities_exact(
         self,

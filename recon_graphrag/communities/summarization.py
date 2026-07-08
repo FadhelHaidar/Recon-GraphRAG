@@ -16,8 +16,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from dataclasses import dataclass
+
+from tqdm.asyncio import tqdm_asyncio
 
 from recon_graphrag.communities.context import (
     CommunityContext,
@@ -44,6 +47,8 @@ from recon_graphrag.communities.reports import (
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse
 from recon_graphrag.models.artifacts import CommunityReport, report_to_text
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -98,7 +103,7 @@ class CommunitySummarizer:
         """
         communities = self.graph_store.get_communities(self.graph_name, level=level)
         if not communities:
-            print(f"  No communities found at level {level}")
+            logger.info("no communities found at level %s", level)
             return [], BuildStats(level=level)
 
         start = time.monotonic()
@@ -121,11 +126,13 @@ class CommunitySummarizer:
                     )
                     if self._has_existing_report(cid, level, input_fingerprint):
                         stats.skipped += 1
-                        print(f"  Skipping community {cid} (report unchanged)")
+                        logger.debug("skipping community %s (report unchanged)", cid)
                         return None
 
-                entity_count = comm.get("entity_count", 0)
-                print(f"  Reporting community {cid} ({entity_count} entities)...")
+                logger.debug(
+                    "reporting community %s (%s entities)",
+                    cid, comm.get("entity_count", 0),
+                )
                 try:
                     report = await self.generate_report(
                         cid,
@@ -153,16 +160,20 @@ class CommunitySummarizer:
                         )
                     except Exception:
                         pass
-                    print(f"  Error reporting community {cid}: {e}")
+                    logger.warning("error reporting community %s: %s", cid, e)
                     return None
 
         tasks = [_process_one(comm) for comm in communities]
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        outcomes = await tqdm_asyncio.gather(
+            *tasks,
+            desc=f"Reporting communities (level {level})",
+            disable=None,
+        )
 
         for outcome in outcomes:
             if isinstance(outcome, Exception):
                 stats.failed += 1
-                print(f"  Unexpected error: {outcome}")
+                logger.error("unexpected error reporting community: %s", outcome)
             elif outcome is not None:
                 results.append(outcome)
 
@@ -277,7 +288,9 @@ class CommunitySummarizer:
             return report
         except ReportValidationError as e:
             # One repair attempt
-            print(f"  Report validation failed for {community_id}, attempting repair...")
+            logger.warning(
+                "report validation failed for %s, attempting repair", community_id
+            )
             repair_prompt = build_repair_prompt(
                 raw_content=e.raw_content,
                 errors=e.errors,
@@ -297,7 +310,7 @@ class CommunitySummarizer:
                 report.context_truncated = context_truncated
                 return report
             except ReportValidationError as e2:
-                print(f"  Repair failed for {community_id}: {e2}")
+                logger.error("repair failed for %s: %s", community_id, e2)
                 raise e2
 
     def _context_fingerprint(self, context: CommunityContext) -> str:

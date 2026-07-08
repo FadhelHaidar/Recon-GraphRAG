@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 
 from recon_graphrag import CommunityPipeline
@@ -90,6 +91,12 @@ def parse_args():
         default=int(os.getenv("COMMUNITY_RANDOM_SEED", "42")),
         help="Random seed for deterministic community detection (Neo4j only; MAGE does not expose a seed).",
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Log per-community detail (DEBUG level).",
+    )
     return parser.parse_args()
 
 
@@ -130,6 +137,10 @@ async def build_communities(
 
 if __name__ == "__main__":
     args = parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
     asyncio.run(
         build_communities(
             args.backend,

@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 from typing import Optional
+
+from tqdm.asyncio import tqdm_asyncio
 
 from recon_graphrag.embeddings import EntityEmbedder
 from recon_graphrag.extraction.chunking import (
@@ -29,6 +32,9 @@ from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore, GraphWriter
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.utils.tokens import TokenCounter, TiktokenTokenCounter
+
+
+logger = logging.getLogger(__name__)
 
 
 class GraphBuilderPipeline:
@@ -142,7 +148,9 @@ class GraphBuilderPipeline:
     ) -> dict:
         document_id = self._make_document_id(text=text, metadata=metadata)
         text_hash = self._hash_text(text)
-        print(f"Starting graph build from text: document_id={document_id} chars={len(text)}")
+        logger.info(
+            "graph build start: document_id=%s chars=%s", document_id, len(text)
+        )
 
         chunker = self._make_text_chunker(
             chunk_size=chunk_size,
@@ -165,7 +173,7 @@ class GraphBuilderPipeline:
             finalize=finalize,
         )
 
-        print(f"Graph build complete: document_id={document_id}")
+        logger.info("graph build complete: document_id=%s", document_id)
         return result
 
     async def build_from_documents(
@@ -242,9 +250,10 @@ class GraphBuilderPipeline:
         document_id = self._make_document_id(text=text, metadata=metadata)
         text_hash = self._hash_text(text)
 
-        print(
-            f"Starting graph build from pages: document_id={document_id} "
-            f"pages={len(pages)} chars={len(text)} window_size={window_size} window_overlap={window_overlap}"
+        logger.info(
+            "graph build start from pages: document_id=%s pages=%s chars=%s "
+            "window_size=%s window_overlap=%s",
+            document_id, len(pages), len(text), window_size, window_overlap,
         )
 
         window_builder = PageWindowBuilder(
@@ -258,12 +267,14 @@ class GraphBuilderPipeline:
         )
 
         if chunks:
-            print(
-                f"Built page windows: document_id={document_id} chunks={len(chunks)} "
-                f"first_page={chunks[0].metadata.get('page_start')} last_page={chunks[-1].metadata.get('page_end')}"
+            logger.info(
+                "built page windows: document_id=%s chunks=%s first_page=%s last_page=%s",
+                document_id, len(chunks),
+                chunks[0].metadata.get("page_start"),
+                chunks[-1].metadata.get("page_end"),
             )
         else:
-            print(f"Built page windows: document_id={document_id} chunks=0")
+            logger.info("built page windows: document_id=%s chunks=0", document_id)
 
         result = await self._build_from_chunks(
             document_id=document_id,
@@ -273,7 +284,7 @@ class GraphBuilderPipeline:
             finalize=finalize,
         )
 
-        print(f"Graph build complete: document_id={document_id}")
+        logger.info("graph build complete: document_id=%s", document_id)
         return result
 
     def _validate_document_envelopes(self, documents: list[dict]) -> None:
@@ -345,12 +356,13 @@ class GraphBuilderPipeline:
         Operates over the entire graph (scoped by graph_name), so it must run
         once per build batch, not once per document.
         """
-        print("Backfilling missing entity descriptions")
+        logger.info("backfilling missing entity descriptions")
         self._backfill_descriptions()
 
+        resolution = None
         if self.perform_entity_resolution:
-            print("Resolving duplicate entities")
-            await self._resolve_entities()
+            logger.info("resolving duplicate entities")
+            resolution = await self._resolve_entities()
 
         if self.summarize_descriptions:
             summarizer = DescriptionSummarizer(
@@ -359,17 +371,40 @@ class GraphBuilderPipeline:
                 self.graph_name,
                 concurrency=self.summarization_concurrency,
             )
-            print("Summarizing entity descriptions")
             await summarizer.summarize_entities(limit=self.summarization_limit)
-            print("Summarizing relationship descriptions")
             await summarizer.summarize_relationships(limit=self.summarization_limit)
 
         if self.embed_entity_nodes:
-            print("Embedding entity nodes")
             await self._embed_entities()
 
-        print("Validating graph build")
-        return self._validate_graph_build()
+        logger.info("validating graph build")
+        validation = self._validate_graph_build()
+        self._write_finalize_summary(resolution, validation)
+        return validation
+
+    def _write_finalize_summary(self, resolution: dict | None, validation: dict) -> None:
+        """Print the post-resolution graph summary (always, via tqdm.write)."""
+        lines = [
+            "graph build summary:",
+            f"  final graph: {validation.get('entity_count')} entities, "
+            f"{validation.get('entity_relationship_count')} relationships",
+        ]
+        if resolution and resolution.get("skipped"):
+            lines.append(
+                f"  entity resolution: skipped ({resolution.get('reason')})"
+            )
+        elif resolution:
+            merged_groups = resolution.get("merged_groups", 0)
+            llm_merged = len(resolution.get("ai_merged_review_groups", []))
+            deterministic = merged_groups - llm_merged
+            lines.append(
+                f"  entity resolution ({resolution.get('strategy')}): "
+                f"{resolution.get('merged_nodes', 0)} nodes merged "
+                f"across {merged_groups} groups "
+                f"(deterministic={deterministic}, llm={llm_merged}); "
+                f"{len(resolution.get('review_groups', []))} flagged for review"
+            )
+        tqdm_asyncio.write("\n".join(lines))
 
     async def _extract_and_write_chunks(
         self,
@@ -383,16 +418,15 @@ class GraphBuilderPipeline:
         extraction_errors = {}
         total = len(chunks)
 
-        print(
-            f"Starting extraction: document_id={document_id} chunks={total} "
-            f"concurrency={self.extraction_concurrency}"
+        logger.info(
+            "extraction start: document_id=%s chunks=%s concurrency=%s",
+            document_id, total, self.extraction_concurrency,
         )
 
         semaphore = asyncio.Semaphore(self.extraction_concurrency)
 
         async def _extract_one(i: int, chunk):
             async with semaphore:
-                print(f"[{i}/{total}] Extracting chunk {chunk.id} ...")
                 try:
                     raw_extraction = await self.extractor.extract(
                         text=chunk.text,
@@ -400,11 +434,10 @@ class GraphBuilderPipeline:
                         max_gleanings=self.max_gleanings,
                     )
                     validated = self.validator.validate(raw_extraction, self.schema)
-                    node_count = len(validated.nodes)
-                    rel_count = len(validated.relationships)
-                    print(
-                        f"  [{i}/{total}] OK chunk {chunk.id} extracted "
-                        f"({node_count} nodes, {rel_count} rels)"
+                    logger.debug(
+                        "[%s/%s] extracted chunk %s: %s nodes, %s rels",
+                        i, total, chunk.id,
+                        len(validated.nodes), len(validated.relationships),
                     )
 
                     # Optionally extract claims
@@ -417,40 +450,50 @@ class GraphBuilderPipeline:
                                 entity_ids=entity_ids,
                                 text_unit_id=chunk.id,
                             )
-                            print(
-                                f"  [{i}/{total}] Claims chunk {chunk.id}: "
-                                f"{len(claims)} claims"
+                            logger.debug(
+                                "[%s/%s] chunk %s: %s claims",
+                                i, total, chunk.id, len(claims),
                             )
                         except Exception as ce:
-                            print(
-                                f"  [{i}/{total}] Claims chunk {chunk.id} failed: {ce}"
+                            logger.warning(
+                                "claims extraction failed for chunk %s: %s",
+                                chunk.id, ce,
                             )
 
                     return chunk.id, validated, claims, None
                 except Exception as e:
-                    print(f"  [{i}/{total}] FAIL chunk {chunk.id} failed")
+                    logger.error("extraction failed for chunk %s: %s", chunk.id, e)
                     return chunk.id, None, [], e
 
         tasks = [
             asyncio.create_task(_extract_one(i, chunk))
             for i, chunk in enumerate(chunks, start=1)
         ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Manual as_completed loop (not tqdm_asyncio.gather) so the bar's postfix
+        # shows running entity/relationship totals live on stderr — visible even
+        # when the caller hasn't configured logging. _extract_one swallows all
+        # exceptions into its return tuple, so awaiting a future never raises.
+        node_total = rel_total = 0
+        with tqdm_asyncio(total=total, desc="Extracting", disable=None) as bar:
+            for future in asyncio.as_completed(tasks):
+                chunk_id, validated, claims, error = await future
+                if error is not None:
+                    extraction_errors[chunk_id] = error
+                else:
+                    chunk_extractions[chunk_id] = validated
+                    node_total += len(validated.nodes)
+                    rel_total += len(validated.relationships)
+                    if claims:
+                        chunk_claims[chunk_id] = claims
+                    bar.set_postfix(entities=node_total, relationships=rel_total)
+                bar.update(1)
 
-        for item in results:
-            if isinstance(item, Exception):
-                raise item
-            chunk_id, validated, claims, error = item
-            if error is not None:
-                extraction_errors[chunk_id] = error
-            else:
-                chunk_extractions[chunk_id] = validated
-                if claims:
-                    chunk_claims[chunk_id] = claims
-
-        print(
-            f"Extraction complete: {len(chunk_extractions)}/{total} succeeded, "
-            f"{len(extraction_errors)}/{total} failed."
+        # tqdm.write (not logger.info) so the summary always prints to stderr
+        # alongside the bar, even when the caller hasn't configured logging.
+        tqdm_asyncio.write(
+            f"extraction complete: {len(chunk_extractions)}/{total} succeeded, "
+            f"{len(extraction_errors)}/{total} failed "
+            f"({node_total} entities, {rel_total} relationships extracted)"
         )
 
         if chunks and not chunk_extractions:
@@ -462,7 +505,7 @@ class GraphBuilderPipeline:
 
         total_claims = sum(len(c) for c in chunk_claims.values())
         if total_claims:
-            print(f"Total claims extracted: {total_claims}")
+            logger.info("total claims extracted: %s", total_claims)
 
         graph_document = self.assembler.assemble(
             document_id=document_id,
@@ -475,11 +518,13 @@ class GraphBuilderPipeline:
         )
 
         write_stats = self.graph_writer.write_graph_document(graph_document)
-        print(
-            f"Writing graph document to {self._graph_store_name()} "
-            f"({write_stats.get('entities')} entities, {write_stats.get('relationships')} relationships) ..."
+        logger.info(
+            "write complete to %s: %s entities, %s relationships, %s claims",
+            self._graph_store_name(),
+            write_stats.get("entities"),
+            write_stats.get("relationships"),
+            write_stats.get("claims", 0),
         )
-        print(f"Write complete: {write_stats}")
 
         return {
             "document_id": document_id,
@@ -521,12 +566,18 @@ class GraphBuilderPipeline:
                 )
             else:
                 raise ValueError(f"Unknown entity resolution strategy: {strategy}")
-            if isinstance(result, dict) and result.get("skipped"):
-                print(f"Entity resolution skipped: reason={result.get('reason')}")
+            if isinstance(result, dict) and not result.get("skipped"):
+                for rg in result.get("review_groups", []):
+                    logger.debug(
+                        "review group: names=%s scores=%s decision=%s",
+                        rg.get("names"), rg.get("scores"), rg.get("decision"),
+                    )
+            return result if isinstance(result, dict) else None
         except Exception as e:
-            print(f"Entity resolution failed: {e}")
+            logger.error("entity resolution failed: %s", e)
             if self.fail_on_resolution_error:
                 raise
+            return None
 
     async def _embed_entities(self):
         """Step 3: Generate vector embeddings for entity nodes."""
@@ -534,7 +585,7 @@ class GraphBuilderPipeline:
         try:
             await embedder.embed_entities()
         except Exception as e:
-            print(f"Entity embedding failed: {e}")
+            logger.error("entity embedding failed: %s", e)
             if self.fail_on_embedding_error:
                 raise
 

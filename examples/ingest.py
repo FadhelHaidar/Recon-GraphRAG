@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -45,6 +46,12 @@ def parse_args():
         choices=["openrouter", "azure_openai", "openai"],
         default=os.getenv("LLM_PROVIDER", "openrouter"),
         help="LLM provider used for hybrid entity-resolution review.",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Log per-chunk / per-item detail (DEBUG level).",
     )
     return parser.parse_args()
 
@@ -98,6 +105,10 @@ async def ingest_artifact(
 
 if __name__ == "__main__":
     args = parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
     asyncio.run(
         ingest_artifact(
             args.input,
