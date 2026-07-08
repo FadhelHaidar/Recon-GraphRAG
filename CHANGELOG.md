@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.3...v0.7.4) (2026-07-08)
+
+
+### Bug Fixes
+
+* replace print statements with logging and add tqdm progress bars ([#77](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/77)) ([3b1e654](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/3b1e654c56520f96b6a4bbe3975fcc3f731f4762))
+
 ## [0.7.3](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.2...v0.7.3) (2026-07-07)
 
 
