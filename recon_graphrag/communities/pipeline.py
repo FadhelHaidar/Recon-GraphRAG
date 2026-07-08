@@ -7,6 +7,7 @@ have been ingested.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from recon_graphrag.communities.reports import ReportRubric
@@ -15,6 +16,8 @@ from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.utils.tokens import TokenCounter
+
+logger = logging.getLogger(__name__)
 
 
 class CommunityPipeline:
@@ -106,7 +109,7 @@ class CommunityPipeline:
         Returns:
             Dict with stats from each step, including per-level build stats.
         """
-        print("Step 4: Detecting communities...")
+        logger.info("detecting communities")
         community_stats = self.graph_store.detect_communities(
             graph_name=self.graph_name,
             relationship_types=self.relationship_types,
@@ -117,7 +120,7 @@ class CommunityPipeline:
             relationship_weight_property=self.relationship_weight_property,
             random_seed=self.random_seed,
         )
-        print(f"  Found {len(community_stats)} communities")
+        logger.info("found %s communities", len(community_stats))
 
         detected_levels = sorted({s["level"] for s in community_stats}, reverse=True)
         levels = (
@@ -140,14 +143,13 @@ class CommunityPipeline:
         )
 
         for lvl in levels:
-            print(f"Step 5: Generating community reports (level {lvl})...")
             reports, stats = await summarizer.generate_all(
                 level=lvl, skip_existing=self.skip_existing
             )
-            print(
-                f"  Level {lvl}: {stats.succeeded} succeeded, "
-                f"{stats.skipped} skipped, {stats.failed} failed "
-                f"({stats.elapsed_seconds:.1f}s)"
+            logger.info(
+                "level %s: %s succeeded, %s skipped, %s failed (%.1fs)",
+                lvl, stats.succeeded, stats.skipped, stats.failed,
+                stats.elapsed_seconds,
             )
 
             total_reports += len(reports)
@@ -163,7 +165,6 @@ class CommunityPipeline:
         # Step 6: Embed community reports
         embedded_count = 0
         if self.embedder and self.embed_community_reports:
-            print("Step 6: Embedding community reports...")
             from recon_graphrag.embeddings.community_reports import (
                 CommunityReportEmbedder,
             )
@@ -174,7 +175,6 @@ class CommunityPipeline:
                 graph_name=self.graph_name,
             )
             embedded_count = await report_embedder.embed_reports()
-            print(f"  Embedded {embedded_count} community reports")
 
         return {
             "communities": len(community_stats),

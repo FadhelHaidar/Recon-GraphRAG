@@ -7,9 +7,14 @@ the graph for semantic retrieval.
 from __future__ import annotations
 
 import asyncio
+import logging
+
+from tqdm.asyncio import tqdm_asyncio
 
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_CONCURRENCY = 10
 
@@ -51,22 +56,29 @@ class EntityEmbedder:
             # would otherwise loop here forever.
             batch_ids = frozenset(e["id"] for e in entities)
             if batch_ids == last_batch_ids:
-                print(
-                    f"  Stopping: {len(entities)} entities could not be embedded "
-                    f"(no progress). Leaving them unembedded."
+                logger.warning(
+                    "stopping: %s entities could not be embedded (no progress); "
+                    "leaving them unembedded",
+                    len(entities),
                 )
                 break
             last_batch_ids = batch_ids
 
-            async def _embed(entity: dict) -> tuple[str, list[float]] | None:
+            # Returns the exception on failure so tqdm_asyncio.gather (no
+            # return_exceptions=) still lets the caller sort ok/failed results.
+            async def _embed(entity: dict):
                 async with semaphore:
-                    text = self._entity_to_text(entity)
-                    embedding = await self.embedder.async_embed_query(text)
-                    return entity["id"], embedding
+                    try:
+                        text = self._entity_to_text(entity)
+                        embedding = await self.embedder.async_embed_query(text)
+                        return entity["id"], embedding
+                    except Exception as e:
+                        return e
 
-            results = await asyncio.gather(
+            results = await tqdm_asyncio.gather(
                 *[_embed(e) for e in entities],
-                return_exceptions=True,
+                desc="Embedding entities",
+                disable=None,
             )
 
             ids, embeddings = [], []
@@ -75,7 +87,7 @@ class EntityEmbedder:
                     name = self._value_to_text(
                         entity.get("name", entity.get("description", ""))
                     )
-                    print(f"  Error embedding entity '{name}': {result}")
+                    logger.warning("error embedding entity '%s': %s", name, result)
                 elif result is not None:
                     ids.append(result[0])
                     embeddings.append(result[1])
@@ -85,9 +97,9 @@ class EntityEmbedder:
                 total += len(ids)
 
         if total == 0:
-            print("  All entities already have embeddings.")
+            logger.info("all entities already have embeddings")
         else:
-            print(f"  Embedded {total} entities.")
+            logger.info("embedded %s entities", total)
 
     @staticmethod
     def _entity_to_text(entity: dict) -> str:

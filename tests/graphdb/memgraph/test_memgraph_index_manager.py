@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from recon_graphrag.graphdb.memgraph.index_manager import IndexManager
 
 
@@ -66,7 +68,7 @@ def test_index_manager_constraint_swallows_already_exists():
     manager.create_indexes()  # should not raise
 
 
-def test_index_manager_constraint_prints_unexpected_error(capsys):
+def test_index_manager_constraint_prints_unexpected_error(caplog):
     store = FakeGraphStore()
 
     def raise_unexpected(query: str, parameters: dict | None = None):
@@ -75,8 +77,8 @@ def test_index_manager_constraint_prints_unexpected_error(capsys):
     store.execute_query = raise_unexpected
     manager = IndexManager(store, embedding_dim=42)
 
-    manager.create_indexes()
+    with caplog.at_level(logging.WARNING):
+        manager.create_indexes()
 
-    captured = capsys.readouterr()
-    assert "community uniqueness constraint failed" in captured.out
-    assert "some other error" in captured.out
+    assert "community uniqueness constraint failed" in caplog.text
+    assert "some other error" in caplog.text

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import asyncio
+import logging
 import pytest
 
 from recon_graphrag.extraction.schema import (
@@ -197,7 +198,7 @@ async def test_build_from_text_orchestration(
 
 @pytest.mark.asyncio
 async def test_build_from_text_logs_derived_graph_store_name(
-    movie_schema, fake_llm, fake_embedder, fake_writer, capsys
+    movie_schema, fake_llm, fake_embedder, fake_writer, caplog
 ):
     store = MyGraphStore()
     pipeline = GraphBuilderPipeline(
@@ -210,10 +211,10 @@ async def test_build_from_text_logs_derived_graph_store_name(
         embed_entities=False,
     )
 
-    await pipeline.build_from_text("Alice directed Inception.")
+    with caplog.at_level(logging.INFO):
+        await pipeline.build_from_text("Alice directed Inception.")
 
-    captured = capsys.readouterr()
-    assert "Writing graph document to My " in captured.out
+    assert "write complete to My:" in caplog.text
 
 
 @pytest.mark.asyncio

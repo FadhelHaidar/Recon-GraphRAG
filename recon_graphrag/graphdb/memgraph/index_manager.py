@@ -10,6 +10,7 @@ These are not MAGE modules; they are built into the Memgraph engine.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from recon_graphrag.embeddings.base import BaseEmbedder
@@ -18,6 +19,8 @@ from recon_graphrag.graphdb.cypher import (
     escape_cypher_identifier,
 )
 from recon_graphrag.models.types import IndexConfig
+
+logger = logging.getLogger(__name__)
 
 
 class IndexManager:
@@ -102,7 +105,7 @@ class IndexManager:
         except Exception as e:
             if "already exists" in str(e).lower():
                 return
-            print(f"  Warning: community uniqueness constraint failed: {e}")
+            logger.warning("community uniqueness constraint failed: %s", e)
 
     def verify(self):
         """Print current graph schema info: indexes, node counts, relationship counts."""
