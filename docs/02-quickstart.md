@@ -97,7 +97,7 @@ schema = GraphSchema(
 )
 ```
 
-See [Schema](03-schema.md) for more ways to define schemas, including the `build_schema()` helper.
+See [Schema](03-schema.md) for more ways to define schemas, including the `build_schema()` helper and `analyze_schema()`, which lets an LLM propose a schema from sample documents when you don't know where to start.
 
 ---
 

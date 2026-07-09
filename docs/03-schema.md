@@ -124,6 +124,65 @@ schema = build_schema(
 
 ---
 
+## Auto-analyzing a schema
+
+If you do not yet know what schema fits your use case, let an LLM propose one from sample documents with `analyze_schema()` (or the async `aanalyze_schema()`):
+
+```python
+from recon_graphrag import analyze_schema, create_llm
+
+llm = create_llm("openai", model_name="gpt-4o-mini", api_key="...")
+
+schema = analyze_schema(
+    llm,
+    texts=sample_texts,                        # a string or list of sample texts
+    hint="news articles about tech companies", # optional domain description
+)
+
+print(schema.node_labels())          # e.g. {"Company", "Person", "Product"}
+print(schema.relationship_labels())  # e.g. {"ACQUIRED", "WORKS_AT"}
+print(schema.patterns)               # e.g. [("Company", "ACQUIRED", "Company")]
+```
+
+The result is a regular `GraphSchema`: inspect it, tweak it (rebuild via `build_schema()` with edited dicts), then pass it to the pipeline as usual.
+
+### How large inputs are handled
+
+Input that fits within `max_sample_tokens` (default 2000 tokens, counted with tiktoken's `cl100k_base` encoding like the pipeline chunker; pass `token_counter` to override) is analyzed in a single LLM call. Larger input is handled map-reduce style, like global search:
+
+1. **Map** — texts are packed whole into batches of up to `max_sample_tokens` each (a text that would overflow a batch starts the next one intact), and every batch is analyzed independently into a partial schema (concurrently with `aanalyze_schema`, sequentially with `analyze_schema`).
+2. **Reduce** — one final LLM call merges the partial proposals into a single schema, unifying labels that mean the same thing (e.g. `Actor` and `Person`).
+
+`max_batches` (default 10) caps the number of analysis calls; batches beyond it are dropped with a warning, so put representative documents first or raise the cap for very heterogeneous corpora. Only a single text that alone exceeds the whole budget is head-truncated.
+
+### Saving and loading schemas as JSON
+
+To edit a proposed schema outside Python, save it to JSON, adjust the file, and load it back:
+
+```python
+from recon_graphrag import save_schema_json, load_schema_json
+
+save_schema_json(schema, "schema.json")   # edit the file by hand...
+schema = load_schema_json("schema.json")  # ...then load it back, validated
+```
+
+The JSON file uses the same shape as `build_schema()` (`node_types`, `relationship_types`, `patterns`). `schema_to_dict(schema)` gives the raw dict if you want to serialize it yourself (e.g. as YAML).
+
+### One-call convenience
+
+To skip the inspection step entirely, omit the schema when constructing the pipeline. It auto-analyzes a schema from the documents on the first ingest call and reuses it afterwards:
+
+```python
+pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder)  # no schema
+await pipeline.build_from_documents(docs)
+
+print(pipeline.schema.node_labels())  # see what was inferred
+```
+
+A hand-crafted schema generally beats an inferred one — treat the proposal as a starting point, review it, and refine it as your domain understanding grows.
+
+---
+
 ## Patterns
 
 `patterns` constrains which relationships are allowed between node labels. Each pattern is a tuple:

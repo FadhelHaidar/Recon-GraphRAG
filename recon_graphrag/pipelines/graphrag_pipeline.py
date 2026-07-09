@@ -26,6 +26,7 @@ from recon_graphrag.extraction.chunking import (
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
 from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
 from recon_graphrag.extraction.schema import GraphSchema
+from recon_graphrag.extraction.schema_analyzer import aanalyze_schema
 from recon_graphrag.extraction.assembler import GraphDocumentAssembler
 from recon_graphrag.extraction.validator import SchemaValidator
 from recon_graphrag.embeddings.base import BaseEmbedder
@@ -45,7 +46,8 @@ class GraphBuilderPipeline:
         graph_store: GraphStore,
         llm: BaseLLM,
         embedder: BaseEmbedder,
-        schema: GraphSchema,
+        # None = auto-analyze a schema from the first ingested documents.
+        schema: Optional[GraphSchema] = None,
         graph_name: str = "entity-graph",
         graph_writer: Optional[GraphWriter] = None,
         extraction_concurrency: int = 5,
@@ -123,6 +125,7 @@ class GraphBuilderPipeline:
 
         Steps 4-5 must be run separately via CommunityPipeline.
         """
+        await self._ensure_schema([text])
         return await self._ingest_text(
             text=text,
             metadata=metadata or {},
@@ -199,6 +202,16 @@ class GraphBuilderPipeline:
         Returns one result dict per input envelope.
         """
         self._validate_document_envelopes(documents)
+
+        if self.schema is None:
+            await self._ensure_schema(
+                [
+                    envelope["text"]
+                    if "text" in envelope
+                    else "\n\n".join(_page_text(page) for page in envelope["pages"])
+                    for envelope in documents
+                ]
+            )
 
         semaphore = asyncio.Semaphore(self.document_concurrency)
 
@@ -286,6 +299,17 @@ class GraphBuilderPipeline:
 
         logger.info("graph build complete: document_id=%s", document_id)
         return result
+
+    async def _ensure_schema(self, texts: list[str]) -> None:
+        """Auto-analyze a schema from the input texts when none was provided."""
+        if self.schema is None:
+            logger.info("no schema provided; auto-analyzing from input documents")
+            self.schema = await aanalyze_schema(self.llm, texts)
+            logger.info(
+                "auto-analyzed schema: nodes=%s relationships=%s",
+                sorted(self.schema.node_labels()),
+                sorted(self.schema.relationship_labels()),
+            )
 
     def _validate_document_envelopes(self, documents: list[dict]) -> None:
         if not isinstance(documents, list):
