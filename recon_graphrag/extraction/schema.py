@@ -6,7 +6,9 @@ primitives, then pass it to the pipeline.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Literal, Optional
 
 
@@ -155,6 +157,9 @@ __all__ = [
     "PropertyType",
     "RelationshipType",
     "build_schema",
+    "load_schema_json",
+    "save_schema_json",
+    "schema_to_dict",
 ]
 
 
@@ -244,3 +249,29 @@ def build_schema(
     )
     schema.validate()
     return schema
+
+
+def schema_to_dict(schema: GraphSchema) -> dict:
+    """Convert a GraphSchema to a JSON-serializable dict (build_schema shape)."""
+    return {
+        "node_types": [asdict(node) for node in schema.node_types],
+        "relationship_types": [asdict(rel) for rel in schema.relationship_types],
+        "patterns": [list(pattern) for pattern in schema.patterns],
+    }
+
+
+def save_schema_json(schema: GraphSchema, path: str | Path) -> None:
+    """Save a GraphSchema to a JSON file. Load it back with load_schema_json."""
+    Path(path).write_text(
+        json.dumps(schema_to_dict(schema), indent=2), encoding="utf-8"
+    )
+
+
+def load_schema_json(path: str | Path) -> GraphSchema:
+    """Load a GraphSchema from a JSON file in the build_schema dict shape."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return build_schema(
+        data.get("node_types") or [],
+        data.get("relationship_types") or [],
+        [tuple(pattern) for pattern in data.get("patterns") or []],
+    )

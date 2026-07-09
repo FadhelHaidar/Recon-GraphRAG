@@ -29,7 +29,7 @@ Domain-agnostic GraphRAG SDK for Neo4j and Memgraph, with a pluggable graph-stor
 - 🔌 **Pluggable graph backends** — Swap between Neo4j and Memgraph via the `GraphStore` protocol
 - 🧠 **Hierarchical community detection** — Multi-level Leiden communities with LLM-generated summaries
 - 🔍 **Three search paradigms** — Local, Global, and DRIFT search for different levels of specificity
-- 📐 **Schema-driven extraction** — Define typed nodes, relationships, and patterns before building
+- 📐 **Schema-driven extraction** — Define typed nodes, relationships, and patterns before building, or let `analyze_schema()` propose a schema from sample documents
 - 🔗 **Hybrid entity resolution** — Fuzzy matching with LLM-based rescue for robust deduplication
 - 🏗️ **Composable building blocks** — Use high-level pipelines or individual workflow steps
 - 🤖 **Multiple LLM providers** — OpenAI, Anthropic, Ollama, OpenRouter, and any OpenAI-compatible endpoint
@@ -194,7 +194,7 @@ For a step-by-step walkthrough, see [docs/02-quickstart.md](docs/02-quickstart.m
 | --- | --- |
 | [docs/installation.md](docs/01-installation.md) | Full installation guide, Docker setup, extras, and troubleshooting |
 | [docs/quickstart.md](docs/02-quickstart.md) | Step-by-step quick start |
-| [docs/schema.md](docs/03-schema.md) | Defining schemas with `GraphSchema` and `build_schema()` |
+| [docs/schema.md](docs/03-schema.md) | Defining schemas with `GraphSchema` and `build_schema()`, or auto-analyzing one with `analyze_schema()` |
 | [docs/indexing.md](docs/04-indexing.md) | Creating and managing Neo4j and Memgraph indexes |
 | [docs/pipelines.md](docs/05-pipelines.md) | `GraphBuilderPipeline` and `CommunityPipeline` architecture |
 | [docs/search.md](docs/06-search.md) | Local, global, and DRIFT search modes, citations, and source metadata |

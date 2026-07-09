@@ -8,7 +8,33 @@ from recon_graphrag.extraction.schema import (
     PropertyType,
     RelationshipType,
     build_schema,
+    load_schema_json,
+    save_schema_json,
 )
+
+
+def test_schema_json_round_trip(tmp_path):
+    schema = build_schema(
+        node_types=[
+            {
+                "label": "Person",
+                "description": "A person",
+                "properties": [{"name": "born", "type": "DATE", "required": True}],
+                "identity_property": "name",
+            },
+            {"label": "Movie", "description": "A film"},
+        ],
+        relationship_types=[
+            {"label": "ACTED_IN", "description": "Person acted in movie"},
+        ],
+        patterns=[("Person", "ACTED_IN", "Movie")],
+    )
+
+    path = tmp_path / "schema.json"
+    save_schema_json(schema, path)
+    loaded = load_schema_json(path)
+
+    assert loaded == schema
 
 
 def test_direct_schema_construction():

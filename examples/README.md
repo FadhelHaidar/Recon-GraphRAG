@@ -5,6 +5,9 @@ An end-to-end movie-domain GraphRAG workflow for Neo4j and Memgraph.
 ## Quick start
 
 ```bash
+# 0. (Optional) Let the LLM propose a schema from the sample corpus
+python analyze_schema.py --llm-provider openrouter
+
 # 1. Extract the movie graph into a neutral JSON artifact
 python extract.py --llm-provider openrouter
 

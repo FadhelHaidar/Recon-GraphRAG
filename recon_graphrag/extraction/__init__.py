@@ -6,7 +6,11 @@ from recon_graphrag.extraction.schema import (
     PropertyType,
     RelationshipType,
     build_schema,
+    load_schema_json,
+    save_schema_json,
+    schema_to_dict,
 )
+from recon_graphrag.extraction.schema_analyzer import aanalyze_schema, analyze_schema
 from recon_graphrag.extraction.types import (
     ChunkRecord,
     DocumentRecord,
@@ -31,6 +35,11 @@ __all__ = [
     "PropertyType",
     "RelationshipType",
     "build_schema",
+    "schema_to_dict",
+    "save_schema_json",
+    "load_schema_json",
+    "analyze_schema",
+    "aanalyze_schema",
     "ExtractedNode",
     "ExtractedRelationship",
     "GraphExtraction",
