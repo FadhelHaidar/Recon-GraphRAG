@@ -19,7 +19,12 @@ After both pipelines run, the graph is ready for search using `LocalSearchRetrie
 
 ## GraphBuilderPipeline
 
-`GraphBuilderPipeline` turns raw text into a resolved and embedded entity graph.
+`GraphBuilderPipeline` turns raw text or structured rows into a resolved and embedded entity graph.
+
+The constructor holds infrastructure and finalize configuration (entity
+resolution, summarization, embedding), which apply to every build method.
+Per-ingest knobs (schema, extraction concurrency, gleanings, chunking) are
+parameters of the build methods.
 
 ```python
 from recon_graphrag import GraphBuilderPipeline
@@ -28,11 +33,7 @@ pipeline = GraphBuilderPipeline(
     graph_store=store,
     llm=llm,
     embedder=embedder,
-    schema=schema,
     graph_name="entity-graph",  # graph scope (default: "entity-graph")
-    extraction_concurrency=5,   # max chunks extracted in parallel (default: 5)
-    max_gleanings=1,            # follow-up extraction loops (default: 1)
-    extract_claims=True,        # extract claims about entities (default: False)
     summarize_descriptions=True,# summarize raw descriptions before embedding
 )
 ```
@@ -41,7 +42,8 @@ pipeline = GraphBuilderPipeline(
 
 #### `build_from_text`
 
-Ingest a single string:
+Ingest a single string. `schema` is required — auto-generate one with
+`analyze_schema`/`aanalyze_schema` if needed:
 
 ```python
 result = await pipeline.build_from_text(
@@ -51,6 +53,10 @@ result = await pipeline.build_from_text(
         "record_id": "movie-row-001",
         "collection": "movies",
     },
+    schema=schema,            # required
+    extraction_concurrency=5, # max chunks extracted in parallel (default: 5)
+    max_gleanings=1,          # follow-up extraction loops (default: 1)
+    extract_claims=True,      # extract claims about entities (default: False)
     chunk_size=1200,          # text chunking size (default: 1200)
     chunk_overlap=100,        # overlap between chunks (default: 100)
     chunk_unit="tokens",      # "tokens" or "characters" (default: "tokens")
@@ -90,7 +96,7 @@ documents = [
         "metadata": {"record_id": "row-2", "table": "tickets"},
     },
 ]
-results = await pipeline.build_from_documents(documents)
+results = await pipeline.build_from_documents(documents, schema=schema)
 ```
 
 Paginated documents use sliding page windows instead of text chunking:
@@ -102,6 +108,7 @@ pages = [
 ]
 results = await pipeline.build_from_documents(
     [{"pages": pages}],
+    schema=schema,
     window_size=2,
     window_overlap=1,
 )
@@ -117,6 +124,11 @@ same call.
 
 | Parameter | Applies to | Description |
 | --------- | ---------- | ----------- |
+| `schema` | `build_from_text`, `build_from_documents` | **Required.** A `GraphSchema` defining entities, relationships, and patterns. Auto-generate one with `analyze_schema`/`aanalyze_schema`. |
+| `extraction_concurrency` | all build methods | Maximum number of chunks/rows extracted in parallel. Defaults to `5`. |
+| `max_gleanings` | all build methods | Follow-up extraction loops after the initial pass. Defaults to `1`; use `0` for single-shot extraction. |
+| `extract_claims` | `build_from_text`, `build_from_documents` | When `True`, runs a second LLM call per chunk to extract claims about entities. Defaults to `False`. |
+| `document_concurrency` | `build_from_documents` | Maximum number of envelopes processed in parallel. Defaults to `1`. |
 | `chunk_size` | `build_from_text`, `build_from_documents` text envelopes | Target chunk size. In tokens by default, or characters when `chunk_unit="characters"`. Defaults to `1200`. |
 | `chunk_overlap` | `build_from_text`, `build_from_documents` text envelopes | Overlap between consecutive chunks. Defaults to `100`. |
 | `chunk_unit` | `build_from_text`, `build_from_documents` text envelopes | `"tokens"` (default) or `"characters"`. |
@@ -161,6 +173,56 @@ You can still pre-chunk text externally with `TextChunker` and pass each chunk
 as its own `"text"` envelope if you need full control over chunk boundaries
 (see [Workflows](09-workflows.md)).
 
+### Structured data: `build_from_rows` / `build_from_csv` / `build_from_excel` / `build_from_sql`
+
+Structured rows (CSV, Excel, SQL query results) are ingested via a `RowMapping`
+that declares how columns become entities, properties, and relationships —
+deterministically, with no LLM call per row. Columns holding free text can
+additionally get an LLM extraction pass.
+
+```python
+from recon_graphrag import RowMapping, ColumnEntity, RowRelationship, TextColumn
+
+mapping = RowMapping(
+    entities=[
+        ColumnEntity(label="Company", identity_column="supplier_name",
+                     properties={"country": "country"}),
+        ColumnEntity(label="Product", identity_column="product_name",
+                     properties={"price": "unit_price", "sku": "sku"},
+                     types={"unit_price": "FLOAT"},
+                     description_template="{product_name} supplied by {supplier_name}"),
+    ],
+    relationships=[RowRelationship("Company", "SUPPLIES", "Product")],
+    text_columns=[TextColumn("notes", anchor_label="Product")],  # LLM pass per row with notes
+    record_id_column="order_id",          # → chunk metadata["record_id"] (citations)
+    metadata_columns=["region"],          # copied into chunk metadata
+)
+
+await pipeline.build_from_csv("orders.csv", mapping)
+await pipeline.build_from_excel("orders.xlsx", mapping, sheet="Q1")  # pip install recon-graphrag[excel]
+await pipeline.build_from_sql(conn, "SELECT * FROM orders", mapping)  # any DB-API connection
+await pipeline.build_from_rows(list_of_dicts, mapping)                # bring your own rows
+```
+
+How it works:
+
+- Each row becomes one `Chunk` (readable `"column: value"` text) linked
+  `FROM_CHUNK` to the row's entities, so provenance and citations carry
+  `record_id` just like text ingestion.
+- Direct entities use label-scoped canonical keys (`"Product:Widget"`), so the
+  same name under two labels stays two nodes. Each gets a deterministic
+  description (from `description_template` or a compact property summary).
+- Rows with a non-empty `TextColumn` get an LLM extraction pass over the row
+  text, using `extraction_schema` (defaults to `mapping.to_schema()`).
+  Extracted entities are linked from the anchor entity via `MENTIONS` (or the
+  relationship you configure) and merge with same-label/same-name direct
+  entities during finalize entity resolution.
+- `mapping.resolution_context()` returns per-label typed columns to pass as
+  `entity_resolution_context_properties` so hybrid LLM review sees structured
+  fields as disambiguation context.
+- A table with no `text_columns`, `entity_resolution_strategy="normalized"`
+  (default), and `summarize_descriptions=False` ingests with **zero LLM calls**.
+
 ### `GraphBuilderPipeline` key parameters
 
 | Parameter | Description |
@@ -168,12 +230,8 @@ as its own `"text"` envelope if you need full control over chunk boundaries
 | `graph_store` | A `GraphStore` implementation such as `Neo4jGraphStore` or `MemgraphGraphStore`. |
 | `llm` | An LLM instance from `create_llm()`. |
 | `embedder` | An embedder instance from `create_embedder()`. |
-| `schema` | A `GraphSchema` defining entities, relationships, and patterns. |
 | `graph_name` | Graph scope for all created nodes and relationships. Defaults to `"entity-graph"`. |
 | `graph_writer` | Optional `GraphWriter` implementation. When omitted, the pipeline writes directly to `graph_store`. |
-| `extraction_concurrency` | Maximum number of chunks to extract in parallel. Set to `1` for sequential extraction. |
-| `max_gleanings` | Number of follow-up extraction loops after the initial pass. Each loop asks the LLM whether it missed any entities, then extracts only the missed items. Defaults to `1`; use `0` for single-shot extraction. |
-| `extract_claims` | When `True`, runs a second LLM call per chunk to extract claims, assertions, and covariates about extracted entities. Claims are stored as `Claim` nodes linked to their subject entity and source chunk, and are available as evidence in community reports and global search. Defaults to `False`. |
 | `perform_entity_resolution` | When `True` (default), resolves duplicate entities after extraction. Set to `False` to skip resolution. |
 | `summarize_descriptions` | When `True` (default), runs a mandatory LLM pass after entity resolution to collapse raw entity and relationship `descriptions` arrays into scalar `description` summaries before embedding. |
 | `summarization_concurrency` | Maximum concurrent description summarization calls. Defaults to `5`. |
@@ -214,7 +272,6 @@ pipeline = GraphBuilderPipeline(
     graph_store=store,
     llm=llm,
     embedder=embedder,
-    schema=schema,
     entity_resolution_strategy="hybrid",
     entity_resolution_context_properties={
         "Movie": ["year", "description"],
@@ -239,13 +296,12 @@ auto-merged.
 ### Gleaning
 
 By default, the extractor makes a single LLM call per chunk. Set
-`max_gleanings` to enable follow-up extraction loops that catch missed entities:
+`max_gleanings` on the build call to enable follow-up extraction loops that
+catch missed entities:
 
 ```python
-pipeline = GraphBuilderPipeline(
-    graph_store=store,
-    llm=llm,
-    embedder=embedder,
+result = await pipeline.build_from_text(
+    text,
     schema=schema,
     max_gleanings=1,  # one follow-up loop
 )
@@ -264,15 +320,13 @@ extraction cost matters more than completeness.
 
 ### Claims extraction
 
-Set `extract_claims=True` to run a second LLM call per chunk that extracts
-claims, assertions, and covariates about the entities already found in that
-chunk:
+Set `extract_claims=True` on the build call to run a second LLM call per chunk
+that extracts claims, assertions, and covariates about the entities already
+found in that chunk:
 
 ```python
-pipeline = GraphBuilderPipeline(
-    graph_store=store,
-    llm=llm,
-    embedder=embedder,
+result = await pipeline.build_from_text(
+    text,
     schema=schema,
     extract_claims=True,
 )

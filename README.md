@@ -156,8 +156,11 @@ llm = create_llm("openai", model_name="gpt-4o", api_key="sk-...")
 embedder = create_embedder("openai", model="text-embedding-3-small", api_key="sk-...")
 
 # Build the graph
-pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder, schema=schema)
-await pipeline.build_from_text("Christopher Nolan directed Inception...")
+pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder)
+await pipeline.build_from_text("Christopher Nolan directed Inception...", schema=schema)
+
+# Or ingest structured data (CSV/Excel/SQL) — see docs/11-structured-data.md
+# await pipeline.build_from_csv("movies.csv", mapping)
 
 # Build communities
 community = CommunityPipeline(
@@ -202,6 +205,7 @@ For a step-by-step walkthrough, see [docs/02-quickstart.md](docs/02-quickstart.m
 | [docs/providers.md](docs/08-providers.md) | LLM and embedder providers |
 | [docs/workflows.md](docs/09-workflows.md) | Composable building blocks below the high-level pipelines |
 | [docs/testing.md](docs/10-testing.md) | Running tests and integration test flags |
+| [docs/structured-data.md](docs/11-structured-data.md) | Ingesting CSV/Excel/SQL rows: `RowMapping`, direct mapping, free-text columns, merging |
 
 ## Example
 

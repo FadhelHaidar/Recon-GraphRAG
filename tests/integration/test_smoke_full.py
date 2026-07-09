@@ -78,9 +78,7 @@ async def _run_synthetic_e2e(store, graph_name: str):
             graph_store=store,
             llm=llm,
             embedder=embedder,
-            schema=SYNTHETIC_SCHEMA,
             graph_name=graph_name,
-            extract_claims=True,
             entity_resolution_strategy="hybrid",
             allow_ai_auto_merge=False,
         )
@@ -93,6 +91,8 @@ async def _run_synthetic_e2e(store, graph_name: str):
                     "external_id": f"{graph_name}-external",
                 },
             }],
+            schema=SYNTHETIC_SCHEMA,
+            extract_claims=True,
             window_size=2,
             window_overlap=1,
         ))[0]

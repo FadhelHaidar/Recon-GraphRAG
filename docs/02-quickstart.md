@@ -136,16 +136,16 @@ pipeline = GraphBuilderPipeline(
     graph_store=store,
     llm=llm,
     embedder=embedder,
-    schema=schema,
 )
 
 await pipeline.build_from_text(
     "Christopher Nolan directed Inception. Hans Zimmer composed the score.",
     metadata={"source": "quickstart"},
+    schema=schema,
 )
 ```
 
-You can also ingest multiple documents or paginated sources with `build_from_documents()`.
+You can also ingest multiple documents or paginated sources with `build_from_documents()`, or structured data (CSV/Excel/SQL rows) with `build_from_csv()` / `build_from_excel()` / `build_from_sql()` — see [docs/11-structured-data.md](11-structured-data.md).
 
 ---
 
@@ -284,8 +284,8 @@ llm = create_llm("openai", model_name="gpt-4o", api_key="sk-...")
 embedder = create_embedder("openai", model="text-embedding-3-small", api_key="sk-...")
 
 # Build graph
-pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder, schema=schema)
-await pipeline.build_from_text("Christopher Nolan directed Inception.")
+pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder)
+await pipeline.build_from_text("Christopher Nolan directed Inception.", schema=schema)
 
 # Build communities
 community = CommunityPipeline(

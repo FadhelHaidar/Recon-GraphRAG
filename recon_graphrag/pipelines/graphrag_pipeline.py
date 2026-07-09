@@ -13,7 +13,8 @@ import asyncio
 import hashlib
 import logging
 import re
-from typing import Optional
+from pathlib import Path
+from typing import Any, Iterable, Optional
 
 from tqdm.asyncio import tqdm_asyncio
 
@@ -26,8 +27,16 @@ from recon_graphrag.extraction.chunking import (
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
 from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
 from recon_graphrag.extraction.schema import GraphSchema
-from recon_graphrag.extraction.schema_analyzer import aanalyze_schema
+from recon_graphrag.extraction.structured import (
+    RowMapping,
+    iter_csv,
+    iter_excel,
+    iter_sql,
+    row_text,
+    rows_to_chunks_and_extractions,
+)
 from recon_graphrag.extraction.assembler import GraphDocumentAssembler
+from recon_graphrag.extraction.types import ExtractedRelationship
 from recon_graphrag.extraction.validator import SchemaValidator
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore, GraphWriter
@@ -39,21 +48,21 @@ logger = logging.getLogger(__name__)
 
 
 class GraphBuilderPipeline:
-    """Build a knowledge graph from text using LLM entity extraction."""
+    """Build a knowledge graph from text (LLM extraction) or structured rows.
+
+    The constructor holds infrastructure (store, llm, embedder) and finalize
+    configuration (entity resolution, summarization, embedding), which apply
+    to every build method. Per-ingest knobs (schema, extraction concurrency,
+    gleanings, chunking, mappings) are parameters of the build methods.
+    """
 
     def __init__(
         self,
         graph_store: GraphStore,
         llm: BaseLLM,
         embedder: BaseEmbedder,
-        # None = auto-analyze a schema from the first ingested documents.
-        schema: Optional[GraphSchema] = None,
         graph_name: str = "entity-graph",
         graph_writer: Optional[GraphWriter] = None,
-        extraction_concurrency: int = 5,
-        document_concurrency: int = 1,
-        max_gleanings: int = 1,
-        extract_claims: bool = False,
         perform_entity_resolution: bool = True,
         entity_resolution_strategy: str = "normalized",
         entity_resolution_aliases: Optional[dict] = None,
@@ -76,12 +85,7 @@ class GraphBuilderPipeline:
         self.graph_store = graph_store
         self.llm = llm
         self.embedder = embedder
-        self.schema = schema
         self.graph_name = graph_name
-        self.extraction_concurrency = extraction_concurrency
-        self.document_concurrency = max(int(document_concurrency), 1)
-        self.max_gleanings = max_gleanings
-        self.extract_claims = extract_claims
         self.perform_entity_resolution = perform_entity_resolution
         self.entity_resolution_strategy = entity_resolution_strategy
         self.entity_resolution_aliases = entity_resolution_aliases
@@ -111,6 +115,10 @@ class GraphBuilderPipeline:
         text: str,
         metadata: Optional[dict] = None,
         *,
+        schema: GraphSchema,
+        extraction_concurrency: int = 5,
+        max_gleanings: int = 1,
+        extract_claims: bool = False,
         chunk_size: int = 1200,
         chunk_overlap: int = 100,
         chunk_unit: str = "tokens",
@@ -119,16 +127,23 @@ class GraphBuilderPipeline:
     ) -> dict:
         """Build knowledge graph from raw text.
 
+        ``schema`` is required; to auto-generate one from sample text, call
+        ``analyze_schema``/``aanalyze_schema`` explicitly and pass the result.
+
         Uses internal token-based chunking and extraction, then automatically:
           - Step 2: Entity resolution (merge duplicates)
           - Step 3: Entity embedding (for local/DRIFT search)
 
         Steps 4-5 must be run separately via CommunityPipeline.
         """
-        await self._ensure_schema([text])
+        self._require_schema(schema)
         return await self._ingest_text(
             text=text,
             metadata=metadata or {},
+            schema=schema,
+            extraction_concurrency=extraction_concurrency,
+            max_gleanings=max_gleanings,
+            extract_claims=extract_claims,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             chunk_unit=chunk_unit,
@@ -142,6 +157,10 @@ class GraphBuilderPipeline:
         text: str,
         metadata: dict,
         *,
+        schema: GraphSchema,
+        extraction_concurrency: int,
+        max_gleanings: int,
+        extract_claims: bool,
         chunk_size: int,
         chunk_overlap: int,
         chunk_unit: str,
@@ -173,6 +192,10 @@ class GraphBuilderPipeline:
             text_hash=text_hash,
             chunks=chunks,
             metadata=metadata,
+            schema=schema,
+            extraction_concurrency=extraction_concurrency,
+            max_gleanings=max_gleanings,
+            extract_claims=extract_claims,
             finalize=finalize,
         )
 
@@ -183,6 +206,11 @@ class GraphBuilderPipeline:
         self,
         documents: list[dict],
         *,
+        schema: GraphSchema,
+        extraction_concurrency: int = 5,
+        document_concurrency: int = 1,
+        max_gleanings: int = 1,
+        extract_claims: bool = False,
         chunk_size: int = 1200,
         chunk_overlap: int = 100,
         chunk_unit: str = "tokens",
@@ -193,6 +221,9 @@ class GraphBuilderPipeline:
     ) -> list[dict]:
         """Build knowledge graph from multiple document envelopes.
 
+        ``schema`` is required; to auto-generate one from sample text, call
+        ``analyze_schema``/``aanalyze_schema`` explicitly and pass the result.
+
         Each envelope must contain exactly one of:
           - ``text``: a raw text string.
           - ``pages``: a list of page strings or page dicts with ``text``.
@@ -201,19 +232,10 @@ class GraphBuilderPipeline:
 
         Returns one result dict per input envelope.
         """
+        self._require_schema(schema)
         self._validate_document_envelopes(documents)
 
-        if self.schema is None:
-            await self._ensure_schema(
-                [
-                    envelope["text"]
-                    if "text" in envelope
-                    else "\n\n".join(_page_text(page) for page in envelope["pages"])
-                    for envelope in documents
-                ]
-            )
-
-        semaphore = asyncio.Semaphore(self.document_concurrency)
+        semaphore = asyncio.Semaphore(max(int(document_concurrency), 1))
 
         # Extract + write each document concurrently. Whole-graph finalization
         # (resolution, summarization, embedding) runs once afterward instead of
@@ -226,6 +248,10 @@ class GraphBuilderPipeline:
                     return await self._ingest_text(
                         text=envelope["text"],
                         metadata=metadata,
+                        schema=schema,
+                        extraction_concurrency=extraction_concurrency,
+                        max_gleanings=max_gleanings,
+                        extract_claims=extract_claims,
                         chunk_size=chunk_size,
                         chunk_overlap=chunk_overlap,
                         chunk_unit=chunk_unit,
@@ -236,6 +262,10 @@ class GraphBuilderPipeline:
                 return await self._build_from_pages_envelope(
                     pages=envelope["pages"],
                     metadata=metadata,
+                    schema=schema,
+                    extraction_concurrency=extraction_concurrency,
+                    max_gleanings=max_gleanings,
+                    extract_claims=extract_claims,
                     window_size=window_size,
                     window_overlap=window_overlap,
                     finalize=False,
@@ -255,6 +285,11 @@ class GraphBuilderPipeline:
         self,
         pages: list[str | dict],
         metadata: dict,
+        *,
+        schema: GraphSchema,
+        extraction_concurrency: int,
+        max_gleanings: int,
+        extract_claims: bool,
         window_size: int,
         window_overlap: int,
         finalize: bool = True,
@@ -294,21 +329,207 @@ class GraphBuilderPipeline:
             text_hash=text_hash,
             chunks=chunks,
             metadata=metadata,
+            schema=schema,
+            extraction_concurrency=extraction_concurrency,
+            max_gleanings=max_gleanings,
+            extract_claims=extract_claims,
             finalize=finalize,
         )
 
         logger.info("graph build complete: document_id=%s", document_id)
         return result
 
-    async def _ensure_schema(self, texts: list[str]) -> None:
-        """Auto-analyze a schema from the input texts when none was provided."""
-        if self.schema is None:
-            logger.info("no schema provided; auto-analyzing from input documents")
-            self.schema = await aanalyze_schema(self.llm, texts)
-            logger.info(
-                "auto-analyzed schema: nodes=%s relationships=%s",
-                sorted(self.schema.node_labels()),
-                sorted(self.schema.relationship_labels()),
+    async def build_from_rows(
+        self,
+        rows: Iterable[dict],
+        mapping: RowMapping,
+        metadata: Optional[dict] = None,
+        *,
+        extraction_schema: Optional[GraphSchema] = None,
+        extraction_concurrency: int = 5,
+        max_gleanings: int = 1,
+        finalize: bool = True,
+    ) -> dict:
+        """Build knowledge graph from structured rows (dicts) via a RowMapping.
+
+        Columns map deterministically to entities/relationships (no LLM).
+        Rows with a non-empty ``TextColumn`` additionally get an LLM extraction
+        pass using ``extraction_schema`` (defaults to ``mapping.to_schema()``);
+        extracted entities are linked to the row's anchor entity and merge with
+        same-label/same-name direct entities during finalize entity resolution.
+        """
+        mapping.validate()
+        rows = [dict(row) for row in rows]
+        metadata = metadata or {}
+        llm_schema = extraction_schema or mapping.to_schema()
+
+        text = "\n\n".join(row_text(row) for row in rows)
+        document_id = self._make_document_id(text=text, metadata=metadata)
+        text_hash = self._hash_text(text)
+        logger.info(
+            "graph build start from rows: document_id=%s rows=%s",
+            document_id, len(rows),
+        )
+
+        chunks, extractions, llm_rows = rows_to_chunks_and_extractions(
+            rows=rows, mapping=mapping, document_id=document_id
+        )
+
+        if llm_rows:
+            await self._extract_text_columns(
+                chunks=chunks,
+                extractions=extractions,
+                llm_rows=llm_rows,
+                schema=llm_schema,
+                extraction_concurrency=extraction_concurrency,
+                max_gleanings=max_gleanings,
+            )
+
+        graph_document = self.assembler.assemble(
+            document_id=document_id,
+            text_hash=text_hash,
+            chunks=chunks,
+            chunk_extractions=extractions,
+            metadata=metadata,
+            graph_name=self.graph_name,
+        )
+        write_stats = self.graph_writer.write_graph_document(graph_document)
+        logger.info(
+            "write complete to %s: %s entities, %s relationships",
+            self._graph_store_name(),
+            write_stats.get("entities"),
+            write_stats.get("relationships"),
+        )
+
+        result = {
+            "extraction": {
+                "document_id": document_id,
+                "chunks": len(chunks),
+                "llm_rows": len(llm_rows),
+                "write_stats": write_stats,
+            }
+        }
+        if finalize:
+            result["validation"] = await self._finalize_graph()
+        logger.info("graph build complete: document_id=%s", document_id)
+        return result
+
+    async def build_from_csv(
+        self,
+        path: str | Path,
+        mapping: RowMapping,
+        metadata: Optional[dict] = None,
+        *,
+        encoding: str = "utf-8-sig",
+        **row_kwargs: Any,
+    ) -> dict:
+        """Build knowledge graph from a CSV file via a RowMapping."""
+        metadata = {"source": Path(path).name, **(metadata or {})}
+        return await self.build_from_rows(
+            iter_csv(path, encoding=encoding), mapping, metadata, **row_kwargs
+        )
+
+    async def build_from_excel(
+        self,
+        path: str | Path,
+        mapping: RowMapping,
+        metadata: Optional[dict] = None,
+        *,
+        sheet: Optional[str] = None,
+        **row_kwargs: Any,
+    ) -> dict:
+        """Build knowledge graph from an Excel worksheet (requires openpyxl)."""
+        metadata = {"source": Path(path).name, **(metadata or {})}
+        return await self.build_from_rows(
+            iter_excel(path, sheet=sheet), mapping, metadata, **row_kwargs
+        )
+
+    async def build_from_sql(
+        self,
+        connection: Any,
+        query: str,
+        mapping: RowMapping,
+        metadata: Optional[dict] = None,
+        *,
+        params: Any = None,
+        **row_kwargs: Any,
+    ) -> dict:
+        """Build knowledge graph from a DB-API 2.0 query result via a RowMapping."""
+        return await self.build_from_rows(
+            iter_sql(connection, query, params=params), mapping, metadata, **row_kwargs
+        )
+
+    async def _extract_text_columns(
+        self,
+        chunks: list,
+        extractions: dict,
+        llm_rows: dict,
+        *,
+        schema: GraphSchema,
+        extraction_concurrency: int,
+        max_gleanings: int,
+    ) -> None:
+        """LLM-extract rows with text columns, merging into their extractions.
+
+        Extraction runs on the full row chunk text so FROM_CHUNK evidence
+        points at exactly what the LLM saw.
+        """
+        pending = [chunk for chunk in chunks if chunk.id in llm_rows]
+        semaphore = asyncio.Semaphore(extraction_concurrency)
+
+        async def _extract_one(chunk):
+            async with semaphore:
+                try:
+                    raw = await self.extractor.extract(
+                        text=chunk.text, schema=schema, max_gleanings=max_gleanings
+                    )
+                    return chunk.id, self.validator.validate(raw, schema), None
+                except Exception as e:
+                    logger.error("extraction failed for row chunk %s: %s", chunk.id, e)
+                    return chunk.id, None, e
+
+        tasks = [asyncio.create_task(_extract_one(chunk)) for chunk in pending]
+        failures = 0
+        with tqdm_asyncio(total=len(tasks), desc="Extracting rows", disable=None) as bar:
+            for future in asyncio.as_completed(tasks):
+                chunk_id, validated, error = await future
+                if error is not None:
+                    failures += 1
+                    bar.update(1)
+                    continue
+
+                target = extractions[chunk_id]
+                target.nodes.extend(validated.nodes)
+                target.relationships.extend(validated.relationships)
+                for anchor_key, anchor_identity, rel_type in llm_rows[chunk_id]:
+                    if not anchor_key:
+                        continue
+                    for node in validated.nodes:
+                        # Skip self-links: resolution later merges the LLM
+                        # node with the direct anchor when names match.
+                        if node.id.strip().lower() == anchor_identity.lower():
+                            continue
+                        target.relationships.append(
+                            ExtractedRelationship(
+                                source_id=anchor_key,
+                                target_id=node.id,
+                                type=rel_type,
+                            )
+                        )
+                bar.update(1)
+
+        if failures:
+            tqdm_asyncio.write(
+                f"row extraction: {failures}/{len(tasks)} LLM passes failed "
+                "(direct-mapped data for those rows is still written)"
+            )
+
+    @staticmethod
+    def _require_schema(schema: GraphSchema) -> None:
+        if not isinstance(schema, GraphSchema):
+            raise ValueError(
+                "schema must be a GraphSchema; to auto-generate one from sample "
+                "text, call analyze_schema/aanalyze_schema and pass the result"
             )
 
     def _validate_document_envelopes(self, documents: list[dict]) -> None:
@@ -360,6 +581,11 @@ class GraphBuilderPipeline:
         text_hash: str,
         chunks: list,
         metadata: dict,
+        *,
+        schema: GraphSchema,
+        extraction_concurrency: int,
+        max_gleanings: int,
+        extract_claims: bool,
         finalize: bool = True,
     ) -> dict:
         extraction = await self._extract_and_write_chunks(
@@ -367,6 +593,10 @@ class GraphBuilderPipeline:
             text_hash=text_hash,
             chunks=chunks,
             metadata=metadata,
+            schema=schema,
+            extraction_concurrency=extraction_concurrency,
+            max_gleanings=max_gleanings,
+            extract_claims=extract_claims,
         )
 
         result = {"extraction": extraction}
@@ -436,6 +666,11 @@ class GraphBuilderPipeline:
         text_hash: str,
         chunks: list,
         metadata: dict,
+        *,
+        schema: GraphSchema,
+        extraction_concurrency: int,
+        max_gleanings: int,
+        extract_claims: bool,
     ) -> dict:
         chunk_extractions = {}
         chunk_claims = {}
@@ -444,20 +679,20 @@ class GraphBuilderPipeline:
 
         logger.info(
             "extraction start: document_id=%s chunks=%s concurrency=%s",
-            document_id, total, self.extraction_concurrency,
+            document_id, total, extraction_concurrency,
         )
 
-        semaphore = asyncio.Semaphore(self.extraction_concurrency)
+        semaphore = asyncio.Semaphore(extraction_concurrency)
 
         async def _extract_one(i: int, chunk):
             async with semaphore:
                 try:
                     raw_extraction = await self.extractor.extract(
                         text=chunk.text,
-                        schema=self.schema,
-                        max_gleanings=self.max_gleanings,
+                        schema=schema,
+                        max_gleanings=max_gleanings,
                     )
-                    validated = self.validator.validate(raw_extraction, self.schema)
+                    validated = self.validator.validate(raw_extraction, schema)
                     logger.debug(
                         "[%s/%s] extracted chunk %s: %s nodes, %s rels",
                         i, total, chunk.id,
@@ -466,7 +701,7 @@ class GraphBuilderPipeline:
 
                     # Optionally extract claims
                     claims = []
-                    if self.extract_claims and validated.nodes:
+                    if extract_claims and validated.nodes:
                         entity_ids = [n.id for n in validated.nodes]
                         try:
                             claims = await self.extractor.extract_claims(

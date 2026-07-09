@@ -147,13 +147,13 @@ async def _run_deterministic_workflow(store, graph_name: str):
             graph_store=store,
             llm=llm,
             embedder=embedder,
-            schema=WORKFLOW_SCHEMA,
             graph_name=graph_name,
             perform_entity_resolution=False,
         )
         build_result = await builder.build_from_text(
             "Alice Rivera works at Acme Security. Acme Security operates the Sentinel monitoring system.",
             metadata={"source": f"{graph_name}-source", "collection": "workflow-test"},
+            schema=WORKFLOW_SCHEMA,
             chunk_size=500,
             chunk_overlap=50,
         )
