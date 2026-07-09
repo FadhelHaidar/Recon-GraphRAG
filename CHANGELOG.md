@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.4...v0.8.0) (2026-07-09)
+
+
+### Features
+
+* **schema:** add LLM-powered auto-analysis of graph schemas from sample documents ([#79](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/79)) ([051a5f1](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/051a5f1c174a3934c41dea8af9c6274227719f90))
+
 ## [0.7.4](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.3...v0.7.4) (2026-07-08)
 
 
