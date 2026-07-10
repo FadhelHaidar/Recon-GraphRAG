@@ -42,6 +42,17 @@ from recon_graphrag.extraction.schema import (
 )
 from recon_graphrag.extraction.schema_analyzer import aanalyze_schema, analyze_schema
 
+# Structured data
+from recon_graphrag.extraction.structured import (
+    ColumnEntity,
+    RowMapping,
+    RowRelationship,
+    TextColumn,
+    iter_csv,
+    iter_excel,
+    iter_sql,
+)
+
 # Models
 from recon_graphrag.models.types import SearchResult, IndexConfig
 from recon_graphrag.extraction.artifacts import (
@@ -100,6 +111,14 @@ __all__ = [
     "load_schema_json",
     "analyze_schema",
     "aanalyze_schema",
+    # Structured data
+    "ColumnEntity",
+    "RowMapping",
+    "RowRelationship",
+    "TextColumn",
+    "iter_csv",
+    "iter_excel",
+    "iter_sql",
     # Models
     "SearchResult",
     "IndexConfig",

@@ -168,15 +168,18 @@ schema = load_schema_json("schema.json")  # ...then load it back, validated
 
 The JSON file uses the same shape as `build_schema()` (`node_types`, `relationship_types`, `patterns`). `schema_to_dict(schema)` gives the raw dict if you want to serialize it yourself (e.g. as YAML).
 
-### One-call convenience
+### Auto-analysis as an explicit pre-step
 
-To skip the inspection step entirely, omit the schema when constructing the pipeline. It auto-analyzes a schema from the documents on the first ingest call and reuses it afterwards:
+The build methods require a schema. To generate one from sample text, call `aanalyze_schema` explicitly and pass the result:
 
 ```python
-pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder)  # no schema
-await pipeline.build_from_documents(docs)
+from recon_graphrag import aanalyze_schema
 
-print(pipeline.schema.node_labels())  # see what was inferred
+schema = await aanalyze_schema(llm, sample_texts)
+print(schema.node_labels())  # see what was inferred
+
+pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder)
+await pipeline.build_from_documents(docs, schema=schema)
 ```
 
 A hand-crafted schema generally beats an inferred one — treat the proposal as a starting point, review it, and refine it as your domain understanding grows.

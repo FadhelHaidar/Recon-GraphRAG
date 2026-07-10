@@ -423,7 +423,6 @@ pipeline = GraphBuilderPipeline(
     graph_store=store,
     llm=llm,
     embedder=embedder,
-    schema=schema,
     graph_writer=ArtifactSavingWriter(store, out_dir="artifacts"),
 )
 ```

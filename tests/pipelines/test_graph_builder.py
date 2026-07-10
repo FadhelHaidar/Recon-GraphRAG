@@ -155,18 +155,6 @@ def fake_writer():
     return writer
 
 
-def _make_test_schema():
-    return GraphSchema(
-        node_types=[
-            NodeType(
-                label="Person",
-                properties=[PropertyType(name="name", type="STRING")],
-            ),
-        ],
-        relationship_types=[],
-    )
-
-
 @pytest.mark.asyncio
 async def test_build_from_text_orchestration(
     movie_schema, fake_llm, fake_embedder, fake_writer
@@ -176,7 +164,6 @@ async def test_build_from_text_orchestration(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
@@ -185,6 +172,7 @@ async def test_build_from_text_orchestration(
     result = await pipeline.build_from_text(
         "Alice directed Inception in 2010.",
         metadata={"source": "test"},
+        schema=movie_schema,
     )
 
     assert "extraction" in result
@@ -205,14 +193,15 @@ async def test_build_from_text_logs_derived_graph_store_name(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
     )
 
     with caplog.at_level(logging.INFO):
-        await pipeline.build_from_text("Alice directed Inception.")
+        await pipeline.build_from_text(
+            "Alice directed Inception.", schema=movie_schema
+        )
 
     assert "write complete to My:" in caplog.text
 
@@ -226,7 +215,6 @@ async def test_build_from_documents_with_page_windows(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
@@ -235,6 +223,7 @@ async def test_build_from_documents_with_page_windows(
     pages = ["Page one", "Page two", "Page three"]
     results = await pipeline.build_from_documents(
         [{"pages": pages, "metadata": {"source": "test"}}],
+        schema=movie_schema,
         window_size=2,
         window_overlap=1,
     )
@@ -254,7 +243,6 @@ async def test_build_from_documents_preserves_page_metadata(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
@@ -267,6 +255,7 @@ async def test_build_from_documents_preserves_page_metadata(
     ]
     results = await pipeline.build_from_documents(
         [{"pages": pages, "metadata": {"source": "document-source", "collection": "movies"}}],
+        schema=movie_schema,
         window_size=2,
         window_overlap=1,
     )
@@ -287,7 +276,6 @@ async def test_build_from_documents_mixed_text_and_pages(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
@@ -304,6 +292,7 @@ async def test_build_from_documents_mixed_text_and_pages(
                 "metadata": {"source": "page-doc"},
             },
         ],
+        schema=movie_schema,
         window_size=2,
         window_overlap=1,
     )
@@ -323,29 +312,39 @@ async def test_build_from_documents_envelope_validation(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
     )
 
     with pytest.raises(ValueError, match="must be a dict"):
-        await pipeline.build_from_documents(["not a dict"])
+        await pipeline.build_from_documents(["not a dict"], schema=movie_schema)
 
     with pytest.raises(ValueError, match="both 'text' and 'pages'"):
-        await pipeline.build_from_documents([{"text": "x", "pages": ["p"]}])
+        await pipeline.build_from_documents(
+            [{"text": "x", "pages": ["p"]}], schema=movie_schema
+        )
 
     with pytest.raises(ValueError, match="either 'text' or 'pages'"):
-        await pipeline.build_from_documents([{"metadata": {}}])
+        await pipeline.build_from_documents([{"metadata": {}}], schema=movie_schema)
 
     with pytest.raises(ValueError, match="'text' must be a string"):
-        await pipeline.build_from_documents([{"text": 123}])
+        await pipeline.build_from_documents([{"text": 123}], schema=movie_schema)
 
     with pytest.raises(ValueError, match="'pages' must be a list"):
-        await pipeline.build_from_documents([{"pages": "not-a-list"}])
+        await pipeline.build_from_documents(
+            [{"pages": "not-a-list"}], schema=movie_schema
+        )
 
     with pytest.raises(ValueError, match="'metadata' must be a dict"):
-        await pipeline.build_from_documents([{"text": "x", "metadata": "bad"}])
+        await pipeline.build_from_documents(
+            [{"text": "x", "metadata": "bad"}], schema=movie_schema
+        )
+
+    with pytest.raises(ValueError, match="schema must be a GraphSchema"):
+        await pipeline.build_from_documents(
+            [{"text": "x"}], schema=None
+        )
 
     fake_writer.write_graph_document.assert_not_called()
 
@@ -359,7 +358,6 @@ async def test_build_from_documents_with_token_chunking(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
@@ -380,6 +378,7 @@ async def test_build_from_documents_with_token_chunking(
                 "metadata": {"source": "token-test"},
             }
         ],
+        schema=movie_schema,
         chunk_size=5,
         chunk_overlap=1,
         chunk_unit="tokens",
@@ -400,7 +399,6 @@ async def test_build_from_text_with_tiktoken_default(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
         perform_entity_resolution=False,
         embed_entities=False,
@@ -408,6 +406,7 @@ async def test_build_from_text_with_tiktoken_default(
 
     result = await pipeline.build_from_text(
         "Alice directed Inception in 2010 with Christopher Nolan. " * 3,
+        schema=movie_schema,
         chunk_size=5,
         chunk_overlap=1,
         chunk_unit="tokens",
@@ -423,7 +422,6 @@ def test_make_document_id_with_source():
         graph_store=store,
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
     doc_id = pipeline._make_document_id("hello", {"source": "My Doc"})
     assert doc_id == "doc:my-doc"
@@ -441,7 +439,6 @@ def test_graph_store_name_uses_backend_class_name(store_cls, expected_name):
         graph_store=store_cls(driver=MagicMock()),
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
 
     assert pipeline._graph_store_name() == expected_name
@@ -452,7 +449,6 @@ def test_graph_store_name_trims_graph_store_suffix():
         graph_store=MyGraphStore(),
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
 
     assert pipeline._graph_store_name() == "My"
@@ -463,7 +459,6 @@ def test_graph_store_name_keeps_custom_class_without_graph_store_suffix():
         graph_store=CustomBackend(),
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
 
     assert pipeline._graph_store_name() == "CustomBackend"
@@ -475,7 +470,6 @@ def test_make_document_id_without_source():
         graph_store=store,
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
     doc_id = pipeline._make_document_id("hello world", {})
     assert doc_id.startswith("doc:")
@@ -488,7 +482,6 @@ def test_hash_text():
         graph_store=store,
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
     h1 = pipeline._hash_text("hello")
     h2 = pipeline._hash_text("hello")
@@ -511,7 +504,6 @@ async def test_hybrid_entity_resolution_forwards_llm_and_embedder(movie_schema):
         graph_store=store,
         llm=llm,
         embedder=embedder,
-        schema=movie_schema,
         entity_resolution_strategy="hybrid",
         entity_resolution_aliases=aliases,
         entity_resolution_llm_guidance=guidance,
@@ -545,10 +537,7 @@ async def test_extract_chunks_concurrently(
         graph_store=store,
         llm=fake_llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
-        extraction_concurrency=3,
-        max_gleanings=0,
         perform_entity_resolution=False,
         embed_entities=False,
     )
@@ -557,6 +546,9 @@ async def test_extract_chunks_concurrently(
     result = await pipeline.build_from_text(
         text,
         metadata={"source": "test"},
+        schema=movie_schema,
+        extraction_concurrency=3,
+        max_gleanings=0,
         chunk_size=15,
         chunk_overlap=5,
     )
@@ -575,9 +567,7 @@ async def test_concurrency_limit_respected(
         graph_store=store,
         llm=MagicMock(),
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
-        extraction_concurrency=2,
         perform_entity_resolution=False,
         embed_entities=False,
     )
@@ -611,6 +601,10 @@ async def test_concurrency_limit_respected(
         text_hash="hash",
         chunks=chunks,
         metadata={},
+        schema=movie_schema,
+        extraction_concurrency=2,
+        max_gleanings=1,
+        extract_claims=False,
     )
 
     assert max_active <= 2
@@ -637,10 +631,7 @@ async def test_partial_extraction_failure_continues(
         graph_store=store,
         llm=llm,
         embedder=fake_embedder,
-        schema=movie_schema,
         graph_writer=fake_writer,
-        extraction_concurrency=3,
-        max_gleanings=0,
         perform_entity_resolution=False,
         embed_entities=False,
     )
@@ -653,6 +644,9 @@ async def test_partial_extraction_failure_continues(
     result = await pipeline.build_from_text(
         text,
         metadata={"source": "test"},
+        schema=movie_schema,
+        extraction_concurrency=3,
+        max_gleanings=0,
         chunk_size=15,
         chunk_overlap=5,
         chunk_unit="characters",
@@ -677,7 +671,6 @@ def test_build_from_text_stamps_graph_name_on_all_records():
         graph_store=store,
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
         graph_name="custom-graph",
     )
 
@@ -740,7 +733,6 @@ def test_pipeline_rerun_does_not_inflate_assembled_records():
         graph_store=store,
         llm=MagicMock(),
         embedder=MagicMock(),
-        schema=_make_test_schema(),
     )
 
     chunks = [

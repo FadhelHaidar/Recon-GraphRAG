@@ -115,8 +115,6 @@ async def test_real_llm_extracts_entities_structurally():
             graph_store=FakeGraphStore(),
             llm=llm,
             embedder=MagicMock(),
-            schema=SYNTHETIC_SCHEMA,
-            extraction_concurrency=2,
             perform_entity_resolution=False,
             embed_entities=False,
         )
@@ -126,6 +124,8 @@ async def test_real_llm_extracts_entities_structurally():
         result = await pipeline.build_from_text(
             combined_text,
             metadata={"source": "synthetic-e2e-test"},
+            schema=SYNTHETIC_SCHEMA,
+            extraction_concurrency=2,
             chunk_size=500,
             chunk_overlap=50,
         )

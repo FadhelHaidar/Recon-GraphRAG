@@ -2,8 +2,7 @@
 
 For when you have no idea what schema fits your use case: the LLM
 proposes one from sample text, which you inspect, tweak, and pass to
-GraphBuilderPipeline. (Or skip inspection entirely by constructing
-GraphBuilderPipeline(schema=None) — it auto-analyzes on first ingest.)
+the build methods (build_from_text/build_from_documents require a schema).
 
 Usage:
   python analyze_schema.py
@@ -74,7 +73,7 @@ async def main(llm_provider: str, hint: str, output: Path | None):
 
         print(
             "\nInspect/tweak the schema, then pass it to "
-            "GraphBuilderPipeline(schema=schema)."
+            "build_from_text(..., schema=schema)."
         )
         return schema
     finally:
