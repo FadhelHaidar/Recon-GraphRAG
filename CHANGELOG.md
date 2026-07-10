@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.8.0...v0.9.0) (2026-07-10)
+
+
+### Features
+
+* **extraction:** enable row-level graph construction from tabular sources ([#81](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/81)) ([3b1f2ef](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/3b1f2ef75f7bf75da5381126ac864dfaa2d19471))
+
 ## [0.8.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.7.4...v0.8.0) (2026-07-09)
 
 
