@@ -30,6 +30,7 @@ from tests.integration.synthetic_e2e_support import (
     SYNTHETIC_SCHEMA,
     assert_build_validation_positive,
     assert_graph_persisted,
+    assert_property_aware_summaries,
 )
 
 
@@ -101,6 +102,8 @@ async def _run_synthetic_e2e(store, graph_name: str):
         assert_build_validation_positive(validation)
 
         assert_graph_persisted(store, graph_name)
+
+        assert_property_aware_summaries(store, graph_name)
 
         writer_doc = build_result.get("graph_document")
         if writer_doc:

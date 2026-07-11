@@ -12,7 +12,28 @@ from tqdm.asyncio import tqdm_asyncio
 from recon_graphrag.extraction.parser import DescriptionSummaryParser
 from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.graphdb.base import GraphStore
+from recon_graphrag.graphdb.entity_resolution_context import (
+    INTERNAL_CONTEXT_FIELDS,
+    STANDARD_CONTEXT_FIELDS,
+)
 from recon_graphrag.llm.base import BaseLLM
+
+# Node properties that are pipeline bookkeeping rather than domain facts;
+# everything else is user-schema data worth showing to the summary LLM.
+_NON_CONTEXT_FIELDS = (
+    INTERNAL_CONTEXT_FIELDS
+    | set(STANDARD_CONTEXT_FIELDS)
+    | {
+        "descriptions",
+        "description_summary_status",
+        "description_input_fingerprint",
+        "description_summary_updated",
+        "description_summary_error",
+        "observation_count",
+        "type",
+        "weight",
+    }
+)
 
 
 class DescriptionSummarizationError(RuntimeError):
@@ -131,6 +152,7 @@ class DescriptionSummarizer:
             descriptions=self._clean_descriptions(entity),
             entity_name=str(entity.get("name") or entity.get("entity_id") or ""),
             entity_type=str(entity.get("type") or "Entity"),
+            properties=self._context_properties(entity),
         )
 
     def _build_relationship_summary_prompt(self, rel: dict) -> str:
@@ -150,6 +172,11 @@ class DescriptionSummarizer:
             "name": entity.get("name"),
             "descriptions": sorted(self._clean_descriptions(entity)),
         }
+        properties = self._context_properties(entity)
+        if properties:
+            payload["properties"] = {
+                key: str(value) for key, value in properties.items()
+            }
         return self._hash_payload(payload)
 
     def _relationship_fingerprint(self, rel: dict) -> str:
@@ -161,6 +188,14 @@ class DescriptionSummarizer:
             "descriptions": sorted(self._clean_descriptions(rel)),
         }
         return self._hash_payload(payload)
+
+    def _context_properties(self, item: dict) -> dict:
+        props = item.get("props") or {}
+        return {
+            key: value
+            for key, value in props.items()
+            if key not in _NON_CONTEXT_FIELDS and value not in (None, "", [], {})
+        }
 
     def _clean_descriptions(self, item: dict) -> list[str]:
         return [

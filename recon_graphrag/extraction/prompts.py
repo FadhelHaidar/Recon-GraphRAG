@@ -7,18 +7,27 @@ from recon_graphrag.extraction.types import GraphExtraction
 class SchemaPromptBuilder:
     @staticmethod
     def build_entity_summary_prompt(
-        descriptions: list[str], entity_name: str, entity_type: str
+        descriptions: list[str],
+        entity_name: str,
+        entity_type: str,
+        properties: dict | None = None,
     ) -> str:
         observations = "\n".join(
             f"- {description}" for description in descriptions if description.strip()
         )
+        attributes = ""
+        if properties:
+            attribute_lines = "\n".join(
+                f"- {key}: {value}" for key, value in sorted(properties.items())
+            )
+            attributes = f"\nKnown attributes:\n{attribute_lines}\n"
         return f"""
 Summarize the following observations about a single entity into one concise description.
-Use only the provided observations. Return plain text only, with no JSON or markdown.
+Use only the provided observations and attributes. Return plain text only, with no JSON or markdown.
 
 Entity name: {entity_name}
 Entity type: {entity_type}
-
+{attributes}
 Observations:
 {observations}
 """.strip()
