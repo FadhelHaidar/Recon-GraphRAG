@@ -63,3 +63,43 @@ def test_claim_prompt_lists_all_entity_ids():
     prompt = SchemaPromptBuilder.build_claim_prompt(text="test", entity_ids=entity_ids)
     for eid in entity_ids:
         assert eid in prompt
+
+
+def test_entity_summary_prompt_includes_attributes():
+    prompt = SchemaPromptBuilder.build_entity_summary_prompt(
+        descriptions=["Founded in Berlin."],
+        entity_name="Acme",
+        entity_type="Company",
+        properties={"founded": 1997, "industry": "robotics"},
+    )
+    assert "Known attributes:" in prompt
+    assert "- founded: 1997" in prompt
+    assert "- industry: robotics" in prompt
+    assert "- Founded in Berlin." in prompt
+
+
+def test_entity_summary_prompt_without_attributes_unchanged():
+    prompt = SchemaPromptBuilder.build_entity_summary_prompt(
+        descriptions=["Founded in Berlin."],
+        entity_name="Acme",
+        entity_type="Company",
+    )
+    assert "Known attributes:" not in prompt
+
+
+def test_summarizer_filters_bookkeeping_properties():
+    from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
+
+    summarizer = DescriptionSummarizer.__new__(DescriptionSummarizer)
+    props = summarizer._context_properties(
+        {
+            "props": {
+                "founded": 1997,
+                "name": "Acme",
+                "description_summary_status": "failed",
+                "graph_name": "g",
+                "empty": "",
+            }
+        }
+    )
+    assert props == {"founded": 1997}

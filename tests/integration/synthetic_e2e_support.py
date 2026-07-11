@@ -68,7 +68,13 @@ SYNTHETIC_SCHEMA = GraphSchema(
         ),
         NodeType(
             label="Incident",
-            properties=[PropertyType(name="name", type="STRING")],
+            properties=[
+                PropertyType(name="name", type="STRING"),
+                # Custom properties backed by explicit corpus facts
+                # ("on 2026-04-12", "root cause was a weak password").
+                PropertyType(name="detected_on", type="DATE"),
+                PropertyType(name="root_cause", type="STRING"),
+            ],
         ),
         NodeType(
             label="Mitigation",
@@ -220,6 +226,45 @@ def assert_graph_persisted(store, graph_name: str) -> None:
             graph_name,
         )
         assert count > 0, f"Expected positive {label} count, got {count}"
+
+
+def assert_property_aware_summaries(store, graph_name: str) -> None:
+    """Assert custom schema properties were extracted and summarized.
+
+    Structural only: at least one Incident carries a custom property
+    (detected_on / root_cause), and every such entity has a successful,
+    non-empty description summary — i.e. the property-aware summarization
+    path ran end to end without failing.
+    """
+    with_props = single_count(
+        store,
+        """
+        MATCH (e:Incident {graph_name: $graph_name})
+        WHERE e.detected_on IS NOT NULL OR e.root_cause IS NOT NULL
+        RETURN count(e) AS count
+        """,
+        graph_name,
+    )
+    assert with_props > 0, (
+        "Expected at least one Incident with a custom property "
+        "(detected_on / root_cause); extraction did not populate them"
+    )
+
+    unsummarized = single_count(
+        store,
+        """
+        MATCH (e:Incident {graph_name: $graph_name})
+        WHERE (e.detected_on IS NOT NULL OR e.root_cause IS NOT NULL)
+          AND (coalesce(e.description_summary_status, '') <> 'success'
+               OR coalesce(e.description, '') = '')
+        RETURN count(e) AS count
+        """,
+        graph_name,
+    )
+    assert unsummarized == 0, (
+        f"Expected all property-bearing Incidents to have successful "
+        f"non-empty summaries, {unsummarized} did not"
+    )
 
 
 def assert_build_validation_positive(validation: dict) -> None:
