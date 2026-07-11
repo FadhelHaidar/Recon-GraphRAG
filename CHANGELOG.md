@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.9.0...v0.9.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **extraction:** include entity properties in description summarization ([#83](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/83)) ([11f86c2](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/11f86c2f62250a1aa4e263a90e0a236348b7c337))
+
 ## [0.9.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.8.0...v0.9.0) (2026-07-10)
 
 
