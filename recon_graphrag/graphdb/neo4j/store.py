@@ -436,7 +436,8 @@ class Neo4jGraphStore(BaseGraphStore):
                e.id AS entity_id,
                coalesce(e.name, e.title, e.id) AS name,
                coalesce(e.type, last(labels(e))) AS type,
-               e.descriptions AS descriptions
+               e.descriptions AS descriptions,
+               properties(e) AS props
         LIMIT $limit
         """
         return self.execute_query(query, {"graph_name": graph_name, "limit": limit})
