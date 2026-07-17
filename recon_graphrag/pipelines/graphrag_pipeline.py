@@ -42,6 +42,13 @@ from recon_graphrag.extraction.validator import SchemaValidator
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore, GraphWriter
 from recon_graphrag.llm.base import BaseLLM
+from recon_graphrag.observability import (
+    render_usage_table,
+    run_scope,
+    track_usage,
+    usage_delta,
+    usage_snapshot,
+)
 from recon_graphrag.utils.tokens import TokenCounter, TiktokenTokenCounter
 
 
@@ -88,8 +95,11 @@ class GraphBuilderPipeline:
         claim_prompt: str | None = None,
         entity_summary_prompt: str | None = None,
         relationship_summary_prompt: str | None = None,
+        track_token_usage: bool = True,
     ):
         self.graph_store = graph_store
+        if track_token_usage:
+            llm = track_usage(llm)
         self.llm = llm
         self.embedder = embedder
         self.graph_name = graph_name
@@ -154,20 +164,25 @@ class GraphBuilderPipeline:
         Steps 4-5 must be run separately via CommunityPipeline.
         """
         self._require_schema(schema)
-        return await self._ingest_text(
-            text=text,
-            metadata=metadata or {},
-            schema=schema,
-            extraction_concurrency=extraction_concurrency,
-            max_gleanings=max_gleanings,
-            extract_claims=extract_claims,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            chunk_unit=chunk_unit,
-            token_counter=token_counter,
-            token_encoding=token_encoding,
-            finalize=True,
-        )
+        with run_scope():
+            result = await self._ingest_text(
+                text=text,
+                metadata=metadata or {},
+                schema=schema,
+                extraction_concurrency=extraction_concurrency,
+                max_gleanings=max_gleanings,
+                extract_claims=extract_claims,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                chunk_unit=chunk_unit,
+                token_counter=token_counter,
+                token_encoding=token_encoding,
+                finalize=True,
+            )
+            token_usage = usage_snapshot(self.llm)
+            if token_usage is not None:
+                result["token_usage"] = token_usage
+            return result
 
     async def _ingest_text(
         self,
@@ -252,51 +267,63 @@ class GraphBuilderPipeline:
         self._require_schema(schema)
         self._validate_document_envelopes(documents)
 
-        semaphore = asyncio.Semaphore(max(int(document_concurrency), 1))
+        with run_scope():
+            semaphore = asyncio.Semaphore(max(int(document_concurrency), 1))
 
-        # Extract + write each document concurrently. Whole-graph finalization
-        # (resolution, summarization, embedding) runs once afterward instead of
-        # once per document, which would rescan the whole graph N times and race
-        # when document_concurrency > 1.
-        async def _build_one(envelope: dict) -> dict:
-            async with semaphore:
-                metadata = envelope.get("metadata") or {}
-                if "text" in envelope:
-                    return await self._ingest_text(
-                        text=envelope["text"],
-                        metadata=metadata,
-                        schema=schema,
-                        extraction_concurrency=extraction_concurrency,
-                        max_gleanings=max_gleanings,
-                        extract_claims=extract_claims,
-                        chunk_size=chunk_size,
-                        chunk_overlap=chunk_overlap,
-                        chunk_unit=chunk_unit,
-                        token_counter=token_counter,
-                        token_encoding=token_encoding,
-                        finalize=False,
-                    )
-                return await self._build_from_pages_envelope(
-                    pages=envelope["pages"],
-                    metadata=metadata,
-                    schema=schema,
-                    extraction_concurrency=extraction_concurrency,
-                    max_gleanings=max_gleanings,
-                    extract_claims=extract_claims,
-                    window_size=window_size,
-                    window_overlap=window_overlap,
-                    finalize=False,
-                )
+            # Extract + write each document concurrently. Whole-graph finalization
+            # (resolution, summarization, embedding) runs once afterward instead of
+            # once per document, which would rescan the whole graph N times and race
+            # when document_concurrency > 1.
+            #
+            # ponytail: before/after usage_delta attributes tokens by wall-clock
+            # window, not call-site, so with document_concurrency > 1 concurrent
+            # documents can bleed into each other's counts. Exact when
+            # document_concurrency=1 (the default).
+            async def _build_one(envelope: dict) -> dict:
+                async with semaphore:
+                    metadata = envelope.get("metadata") or {}
+                    before = usage_snapshot(self.llm)
+                    if "text" in envelope:
+                        result = await self._ingest_text(
+                            text=envelope["text"],
+                            metadata=metadata,
+                            schema=schema,
+                            extraction_concurrency=extraction_concurrency,
+                            max_gleanings=max_gleanings,
+                            extract_claims=extract_claims,
+                            chunk_size=chunk_size,
+                            chunk_overlap=chunk_overlap,
+                            chunk_unit=chunk_unit,
+                            token_counter=token_counter,
+                            token_encoding=token_encoding,
+                            finalize=False,
+                        )
+                    else:
+                        result = await self._build_from_pages_envelope(
+                            pages=envelope["pages"],
+                            metadata=metadata,
+                            schema=schema,
+                            extraction_concurrency=extraction_concurrency,
+                            max_gleanings=max_gleanings,
+                            extract_claims=extract_claims,
+                            window_size=window_size,
+                            window_overlap=window_overlap,
+                            finalize=False,
+                        )
+                    after = usage_snapshot(self.llm)
+                    if after is not None:
+                        result["token_usage"] = usage_delta(before, after)
+                    return result
 
-        tasks = [
-            asyncio.create_task(_build_one(envelope)) for envelope in documents
-        ]
-        results = await asyncio.gather(*tasks)
+            tasks = [
+                asyncio.create_task(_build_one(envelope)) for envelope in documents
+            ]
+            results = await asyncio.gather(*tasks)
 
-        validation = await self._finalize_graph()
-        for result in results:
-            result["validation"] = validation
-        return results
+            validation = await self._finalize_graph()
+            for result in results:
+                result["validation"] = validation
+            return results
 
     async def _build_from_pages_envelope(
         self,
@@ -380,56 +407,60 @@ class GraphBuilderPipeline:
         metadata = metadata or {}
         llm_schema = extraction_schema or mapping.to_schema()
 
-        text = "\n\n".join(row_text(row) for row in rows)
-        document_id = self._make_document_id(text=text, metadata=metadata)
-        text_hash = self._hash_text(text)
-        logger.info(
-            "graph build start from rows: document_id=%s rows=%s",
-            document_id, len(rows),
-        )
-
-        chunks, extractions, llm_rows = rows_to_chunks_and_extractions(
-            rows=rows, mapping=mapping, document_id=document_id
-        )
-
-        if llm_rows:
-            await self._extract_text_columns(
-                chunks=chunks,
-                extractions=extractions,
-                llm_rows=llm_rows,
-                schema=llm_schema,
-                extraction_concurrency=extraction_concurrency,
-                max_gleanings=max_gleanings,
+        with run_scope():
+            text = "\n\n".join(row_text(row) for row in rows)
+            document_id = self._make_document_id(text=text, metadata=metadata)
+            text_hash = self._hash_text(text)
+            logger.info(
+                "graph build start from rows: document_id=%s rows=%s",
+                document_id, len(rows),
             )
 
-        graph_document = self.assembler.assemble(
-            document_id=document_id,
-            text_hash=text_hash,
-            chunks=chunks,
-            chunk_extractions=extractions,
-            metadata=metadata,
-            graph_name=self.graph_name,
-        )
-        write_stats = self.graph_writer.write_graph_document(graph_document)
-        logger.info(
-            "write complete to %s: %s entities, %s relationships",
-            self._graph_store_name(),
-            write_stats.get("entities"),
-            write_stats.get("relationships"),
-        )
+            chunks, extractions, llm_rows = rows_to_chunks_and_extractions(
+                rows=rows, mapping=mapping, document_id=document_id
+            )
 
-        result = {
-            "extraction": {
-                "document_id": document_id,
-                "chunks": len(chunks),
-                "llm_rows": len(llm_rows),
-                "write_stats": write_stats,
+            if llm_rows:
+                await self._extract_text_columns(
+                    chunks=chunks,
+                    extractions=extractions,
+                    llm_rows=llm_rows,
+                    schema=llm_schema,
+                    extraction_concurrency=extraction_concurrency,
+                    max_gleanings=max_gleanings,
+                )
+
+            graph_document = self.assembler.assemble(
+                document_id=document_id,
+                text_hash=text_hash,
+                chunks=chunks,
+                chunk_extractions=extractions,
+                metadata=metadata,
+                graph_name=self.graph_name,
+            )
+            write_stats = self.graph_writer.write_graph_document(graph_document)
+            logger.info(
+                "write complete to %s: %s entities, %s relationships",
+                self._graph_store_name(),
+                write_stats.get("entities"),
+                write_stats.get("relationships"),
+            )
+
+            result = {
+                "extraction": {
+                    "document_id": document_id,
+                    "chunks": len(chunks),
+                    "llm_rows": len(llm_rows),
+                    "write_stats": write_stats,
+                }
             }
-        }
-        if finalize:
-            result["validation"] = await self._finalize_graph()
-        logger.info("graph build complete: document_id=%s", document_id)
-        return result
+            if finalize:
+                result["validation"] = await self._finalize_graph()
+            token_usage = usage_snapshot(self.llm)
+            if token_usage is not None:
+                result["token_usage"] = token_usage
+            logger.info("graph build complete: document_id=%s", document_id)
+            return result
 
     async def build_from_csv(
         self,
@@ -651,10 +682,13 @@ class GraphBuilderPipeline:
 
         logger.info("validating graph build")
         validation = self._validate_graph_build()
-        self._write_finalize_summary(resolution, validation)
+        token_usage = usage_snapshot(self.llm)
+        self._write_finalize_summary(resolution, validation, token_usage)
         return validation
 
-    def _write_finalize_summary(self, resolution: dict | None, validation: dict) -> None:
+    def _write_finalize_summary(
+        self, resolution: dict | None, validation: dict, token_usage: dict | None = None
+    ) -> None:
         """Print the post-resolution graph summary (always, via tqdm.write)."""
         lines = [
             "graph build summary:",
@@ -676,6 +710,9 @@ class GraphBuilderPipeline:
                 f"(deterministic={deterministic}, llm={llm_merged}); "
                 f"{len(resolution.get('review_groups', []))} flagged for review"
             )
+        if token_usage:
+            lines.append("")
+            lines.append(render_usage_table(token_usage))
         tqdm_asyncio.write("\n".join(lines))
 
     async def _extract_and_write_chunks(

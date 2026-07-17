@@ -915,6 +915,79 @@ async def extract_to_json(text: str, schema: GraphSchema, llm, out_path: Path):
 
 ---
 
+## Token usage observability
+
+Token usage is tracked **by default** for every pipeline and search call, which
+surfaces a `token_usage` summary in its result — see
+[Token usage](05-pipelines.md#token-usage) for that default behavior, the stage
+taxonomy, and `render_usage_table`. This section covers the primitives for when
+you need more than the default.
+
+Call `track_usage()` to wrap an LLM yourself when you want to attach a
+`JsonlUsageSink`, use your own `TokenUsageLedger` for cross-call accumulation
+(see below), or track a standalone building block that isn't auto-wrapped
+(`CommunitySummarizer`, `LLMGraphExtractor`, `DescriptionSummarizer`,
+`analyze_schema`/`aanalyze_schema`,
+`GraphStore.resolve_entities_hybrid(llm=...)`). `track_usage()` is idempotent,
+so wrapping the LLM before passing it into a pipeline (e.g. to attach a custom
+ledger) is always safe — the pipeline's own auto-wrap becomes a no-op.
+
+```python
+from recon_graphrag import LLMGraphExtractor, render_usage_table, track_usage, usage_snapshot
+
+llm = track_usage(create_llm(...))
+extractor = LLMGraphExtractor(llm)  # a standalone primitive, not auto-wrapped
+# ... run it inside a run scope ...
+print(render_usage_table(usage_snapshot(llm)))
+```
+
+### Run scoping in web services
+
+Pipelines create a run per invocation, so concurrent requests never mix
+totals (contextvars isolate asyncio tasks and threads). To attribute usage to
+your own request IDs, open the scope yourself — nested pipeline scopes reuse
+the outermost run:
+
+```python
+from recon_graphrag import run_scope, usage_snapshot
+
+@app.post("/build")
+async def build(request_id: str, payload: BuildRequest):
+    with run_scope(request_id):
+        result = await pipeline.build_from_text(text=payload.text, schema=schema)
+        return {"usage": usage_snapshot(llm)}
+```
+
+### Persisting and analyzing events
+
+Attach a `JsonlUsageSink` to append every event (one JSON object per line) to
+a file, then roll it up later:
+
+```python
+from recon_graphrag import (
+    JsonlUsageSink,
+    TokenUsageLedger,
+    load_usage_events,
+    summarize_events,
+    track_usage,
+)
+
+ledger = TokenUsageLedger(sinks=[JsonlUsageSink("usage.jsonl")])
+llm = track_usage(create_llm(...), ledger=ledger)
+
+# ... run pipelines ...
+
+rollup = summarize_events(load_usage_events("usage.jsonl"))
+print(rollup["totals"]["total_tokens"])
+```
+
+Each JSONL line carries `ts`, `run_id`, `stage`, `model`, `input_tokens`,
+`output_tokens`, `estimated`, and `latency_ms`, so cost computation and
+dashboards can be built externally. See
+[`examples/token_usage.py`](../examples/token_usage.py) for an end-to-end demo.
+
+---
+
 ## Next steps
 
 - Combine these primitives with custom `GraphWriter` for logging or caching.

@@ -15,6 +15,7 @@ from recon_graphrag.communities.summarization import CommunitySummarizer
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
+from recon_graphrag.observability import run_scope, track_usage, usage_snapshot
 from recon_graphrag.utils.tokens import TokenCounter
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class CommunityPipeline:
         max_report_words: int | None = 2000,
         embedder: BaseEmbedder | None = None,
         embed_community_reports: bool = True,
+        track_token_usage: bool = True,
     ):
         """Initialize the community pipeline.
 
@@ -80,9 +82,11 @@ class CommunityPipeline:
                 report embeddings after generation.
             embed_community_reports: Whether to embed community reports
                 after report generation. Requires embedder to be set.
+            track_token_usage: Whether to auto-wrap ``llm`` with token-usage
+                tracking (no-op if it's already wrapped).
         """
         self.graph_store = graph_store
-        self.llm = llm
+        self.llm = track_usage(llm) if track_token_usage else llm
         self.relationship_types = relationship_types
         self.max_levels = max_levels
         self.gamma = gamma
@@ -117,78 +121,86 @@ class CommunityPipeline:
         Returns:
             Dict with stats from each step, including per-level build stats.
         """
-        logger.info("detecting communities")
-        community_stats = self.graph_store.detect_communities(
-            graph_name=self.graph_name,
-            relationship_types=self.relationship_types,
-            max_levels=self.max_levels,
-            gamma=self.gamma,
-            theta=self.theta,
-            tolerance=self.tolerance,
-            relationship_weight_property=self.relationship_weight_property,
-            random_seed=self.random_seed,
-        )
-        logger.info("found %s communities", len(community_stats))
-
-        detected_levels = sorted({s["level"] for s in community_stats}, reverse=True)
-        levels = (
-            [lvl for lvl in detected_levels if lvl >= level]
-            if level is not None
-            else detected_levels
-        )
-        total_reports = 0
-        level_stats: list[dict] = []
-
-        summarizer = CommunitySummarizer(
-            self.graph_store,
-            self.llm,
-            graph_name=self.graph_name,
-            report_rubric=self.report_rubric,
-            concurrency=self.summarize_concurrency,
-            max_context_tokens=self.max_context_tokens,
-            token_counter=self.token_counter,
-            max_report_words=self.max_report_words,
-            report_prompt=self.report_prompt,
-        )
-
-        for lvl in levels:
-            reports, stats = await summarizer.generate_all(
-                level=lvl, skip_existing=self.skip_existing
-            )
-            logger.info(
-                "level %s: %s succeeded, %s skipped, %s failed (%.1fs)",
-                lvl, stats.succeeded, stats.skipped, stats.failed,
-                stats.elapsed_seconds,
-            )
-
-            total_reports += len(reports)
-            level_stats.append({
-                "level": lvl,
-                "attempted": stats.attempted,
-                "skipped": stats.skipped,
-                "succeeded": stats.succeeded,
-                "failed": stats.failed,
-                "elapsed_seconds": round(stats.elapsed_seconds, 2),
-            })
-
-        # Step 6: Embed community reports
-        embedded_count = 0
-        if self.embedder and self.embed_community_reports:
-            from recon_graphrag.embeddings.community_reports import (
-                CommunityReportEmbedder,
-            )
-
-            report_embedder = CommunityReportEmbedder(
-                graph_store=self.graph_store,
-                embedder=self.embedder,
+        with run_scope():
+            logger.info("detecting communities")
+            community_stats = self.graph_store.detect_communities(
                 graph_name=self.graph_name,
+                relationship_types=self.relationship_types,
+                max_levels=self.max_levels,
+                gamma=self.gamma,
+                theta=self.theta,
+                tolerance=self.tolerance,
+                relationship_weight_property=self.relationship_weight_property,
+                random_seed=self.random_seed,
             )
-            embedded_count = await report_embedder.embed_reports()
+            logger.info("found %s communities", len(community_stats))
 
-        return {
-            "communities": len(community_stats),
-            "reports": total_reports,
-            "levels": levels,
-            "level_stats": level_stats,
-            "embedded_reports": embedded_count,
-        }
+            detected_levels = sorted({s["level"] for s in community_stats}, reverse=True)
+            levels = (
+                [lvl for lvl in detected_levels if lvl >= level]
+                if level is not None
+                else detected_levels
+            )
+            total_reports = 0
+            level_stats: list[dict] = []
+
+            summarizer = CommunitySummarizer(
+                self.graph_store,
+                self.llm,
+                graph_name=self.graph_name,
+                report_rubric=self.report_rubric,
+                concurrency=self.summarize_concurrency,
+                max_context_tokens=self.max_context_tokens,
+                token_counter=self.token_counter,
+                max_report_words=self.max_report_words,
+                report_prompt=self.report_prompt,
+            )
+
+            for lvl in levels:
+                reports, stats = await summarizer.generate_all(
+                    level=lvl, skip_existing=self.skip_existing
+                )
+                logger.info(
+                    "level %s: %s succeeded, %s skipped, %s failed (%.1fs)",
+                    lvl, stats.succeeded, stats.skipped, stats.failed,
+                    stats.elapsed_seconds,
+                )
+
+                total_reports += len(reports)
+                level_stats.append({
+                    "level": lvl,
+                    "attempted": stats.attempted,
+                    "skipped": stats.skipped,
+                    "succeeded": stats.succeeded,
+                    "failed": stats.failed,
+                    "elapsed_seconds": round(stats.elapsed_seconds, 2),
+                    "llm_calls": stats.llm_calls,
+                    "input_tokens": stats.input_tokens,
+                    "output_tokens": stats.output_tokens,
+                })
+
+            # Step 6: Embed community reports
+            embedded_count = 0
+            if self.embedder and self.embed_community_reports:
+                from recon_graphrag.embeddings.community_reports import (
+                    CommunityReportEmbedder,
+                )
+
+                report_embedder = CommunityReportEmbedder(
+                    graph_store=self.graph_store,
+                    embedder=self.embedder,
+                    graph_name=self.graph_name,
+                )
+                embedded_count = await report_embedder.embed_reports()
+
+            result = {
+                "communities": len(community_stats),
+                "reports": total_reports,
+                "levels": levels,
+                "level_stats": level_stats,
+                "embedded_reports": embedded_count,
+            }
+            token_usage = usage_snapshot(self.llm)
+            if token_usage is not None:
+                result["token_usage"] = token_usage
+            return result

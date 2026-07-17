@@ -18,6 +18,20 @@ from recon_graphrag.retrieval.drift_types import (
 
 # Providers
 from recon_graphrag.llm import create_llm, BaseLLM, LLMResponse, LLMUsage
+from recon_graphrag.observability import (
+    UsageTrackingLLM,
+    TokenUsageEvent,
+    TokenUsageLedger,
+    token_stage,
+    run_scope,
+    track_usage,
+    usage_snapshot,
+    usage_delta,
+    render_usage_table,
+    JsonlUsageSink,
+    load_usage_events,
+    summarize_events,
+)
 from recon_graphrag.embeddings import (
     create_embedder,
     BaseEmbedder,
@@ -96,6 +110,19 @@ __all__ = [
     "CommunityReportEmbedder",
     "EntityEmbedder",
     "ModelParamsEmbedder",
+    # Observability
+    "UsageTrackingLLM",
+    "TokenUsageEvent",
+    "TokenUsageLedger",
+    "token_stage",
+    "run_scope",
+    "track_usage",
+    "usage_snapshot",
+    "usage_delta",
+    "render_usage_table",
+    "JsonlUsageSink",
+    "load_usage_events",
+    "summarize_events",
     # Graph store
     "GraphStore",
     "Neo4jGraphStore",

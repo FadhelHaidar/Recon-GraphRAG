@@ -29,6 +29,7 @@ from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.types import SearchResult
+from recon_graphrag.observability import run_scope, token_stage, track_usage, usage_snapshot
 
 from recon_graphrag.retrieval.citations import (
     resolve_chunk_citations,
@@ -210,9 +211,10 @@ class DriftSearchRetriever:
         graph_name: str = "entity-graph",
         config: DriftSearchConfig | None = None,
         token_counter: TokenCounter | None = None,
+        track_token_usage: bool = True,
     ):
         self.graph_store = graph_store
-        self.llm = llm
+        self.llm = track_usage(llm) if track_token_usage else llm
         self.embedder = embedder
         self.retrieval_query = retrieval_query
         self.reduce_prompt = reduce_prompt or REDUCE_PROMPT
@@ -269,63 +271,64 @@ class DriftSearchRetriever:
             conversation_history: Optional conversation history string injected
                 into prompts.
         """
-        start = time.monotonic()
-        state = DriftQueryState(query=query)
-        call_lock = asyncio.Lock()
+        with run_scope():
+            start = time.monotonic()
+            state = DriftQueryState(query=query)
+            call_lock = asyncio.Lock()
 
-        config = self.config
-        target_selector = (
-            community_level if community_level is not None else config.community_level
-        )
-        resolved_level = resolve_community_level(
-            self.graph_store, self.graph_name, target_selector
-        )
-
-        # --- Phase 1: Primer ---
-        primer_result = await self._primer_phase(
-            query,
-            state,
-            resolved_level,
-            config.primer_top_k,
-            conversation_history,
-            query_vector,
-            config,
-            call_lock,
-        )
-
-        if primer_result.get("fallback"):
-            return await self._fallback_search(
-                query=query,
-                state=state,
-                top_k=top_k,
-                effective_search_ratio=effective_search_ratio,
-                query_params=query_params,
-                ranker=ranker,
-                alpha=alpha,
-                synthesize_response=synthesize_response,
-                reason=primer_result.get("fallback_reason", "missing_report_embeddings"),
-                call_lock=call_lock,
+            config = self.config
+            target_selector = (
+                community_level if community_level is not None else config.community_level
+            )
+            resolved_level = resolve_community_level(
+                self.graph_store, self.graph_name, target_selector
             )
 
-        # --- Phase 2: Traversal ---
-        await self._traversal_phase(
-            query, state, config, top_k, effective_search_ratio,
-            query_params, ranker, alpha, conversation_history,
-            synthesize_citation_metadata, synthesis_metadata_keys, call_lock,
-            synthesize_response,
-        )
+            # --- Phase 1: Primer ---
+            primer_result = await self._primer_phase(
+                query,
+                state,
+                resolved_level,
+                config.primer_top_k,
+                conversation_history,
+                query_vector,
+                config,
+                call_lock,
+            )
 
-        # --- Phase 3: Reduction ---
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        state.phase_tokens["elapsed_ms"] = elapsed_ms
+            if primer_result.get("fallback"):
+                return await self._fallback_search(
+                    query=query,
+                    state=state,
+                    top_k=top_k,
+                    effective_search_ratio=effective_search_ratio,
+                    query_params=query_params,
+                    ranker=ranker,
+                    alpha=alpha,
+                    synthesize_response=synthesize_response,
+                    reason=primer_result.get("fallback_reason", "missing_report_embeddings"),
+                    call_lock=call_lock,
+                )
 
-        return await self._reduction_phase(
-            query=query,
-            state=state,
-            synthesize_response=synthesize_response,
-            conversation_history=conversation_history,
-            call_lock=call_lock,
-        )
+            # --- Phase 2: Traversal ---
+            await self._traversal_phase(
+                query, state, config, top_k, effective_search_ratio,
+                query_params, ranker, alpha, conversation_history,
+                synthesize_citation_metadata, synthesis_metadata_keys, call_lock,
+                synthesize_response,
+            )
+
+            # --- Phase 3: Reduction ---
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            state.phase_tokens["elapsed_ms"] = elapsed_ms
+
+            return await self._reduction_phase(
+                query=query,
+                state=state,
+                synthesize_response=synthesize_response,
+                conversation_history=conversation_history,
+                call_lock=call_lock,
+            )
 
     # ------------------------------------------------------------------
     # Phase 1: Primer
@@ -845,29 +848,37 @@ class DriftSearchRetriever:
 
         if not synthesize_response:
             trace = self._build_trace(state)
+            token_usage = usage_snapshot(self.llm)
+            metadata = {
+                "synthesize_response": False,
+                "response_synthesis_skipped": True,
+                "drift_trace": trace,
+            }
+            if token_usage is not None:
+                metadata["token_usage"] = token_usage
             return SearchResult(
                 query=query,
                 mode="drift",
                 answer="",
                 context=action_context,
                 citations=all_citations,
-                metadata={
-                    "synthesize_response": False,
-                    "response_synthesis_skipped": True,
-                    "drift_trace": trace,
-                },
+                metadata=metadata,
             )
 
         # Reduce LLM
         if not action_context:
             trace = self._build_trace(state)
+            token_usage = usage_snapshot(self.llm)
+            metadata = {"drift_trace": trace}
+            if token_usage is not None:
+                metadata["token_usage"] = token_usage
             return SearchResult(
                 query=query,
                 mode="drift",
                 answer="No relevant information found.",
                 context="",
                 citations=all_citations,
-                metadata={"drift_trace": trace},
+                metadata=metadata,
             )
 
         prompt = self.reduce_prompt.format(
@@ -894,13 +905,17 @@ class DriftSearchRetriever:
             answer = "Failed to synthesize final answer."
 
         trace = self._build_trace(state)
+        token_usage = usage_snapshot(self.llm)
+        metadata = {"drift_trace": trace}
+        if token_usage is not None:
+            metadata["token_usage"] = token_usage
         return SearchResult(
             query=query,
             mode="drift",
             answer=answer,
             context=action_context,
             citations=all_citations,
-            metadata={"drift_trace": trace},
+            metadata=metadata,
         )
 
     # ------------------------------------------------------------------
@@ -947,18 +962,22 @@ class DriftSearchRetriever:
         if not synthesize_response:
             trace = self._build_trace(state)
             trace["fallback_reason"] = reason
+            token_usage = usage_snapshot(self.llm)
+            metadata = {
+                "synthesize_response": False,
+                "response_synthesis_skipped": True,
+                "drift_fallback_reason": reason,
+                "drift_trace": trace,
+            }
+            if token_usage is not None:
+                metadata["token_usage"] = token_usage
             return SearchResult(
                 query=query,
                 mode="drift",
                 answer="",
                 context=entity_context,
                 citations=citations,
-                metadata={
-                    "synthesize_response": False,
-                    "response_synthesis_skipped": True,
-                    "drift_fallback_reason": reason,
-                    "drift_trace": trace,
-                },
+                metadata=metadata,
             )
 
         prompt = FALLBACK_ANSWER_PROMPT.format(
@@ -980,16 +999,20 @@ class DriftSearchRetriever:
 
         trace = self._build_trace(state)
         trace["fallback_reason"] = reason
+        token_usage = usage_snapshot(self.llm)
+        metadata = {
+            "drift_fallback_reason": reason,
+            "drift_trace": trace,
+        }
+        if token_usage is not None:
+            metadata["token_usage"] = token_usage
         return SearchResult(
             query=query,
             mode="drift",
             answer=answer,
             context=entity_context,
             citations=citations,
-            metadata={
-                "drift_fallback_reason": reason,
-                "drift_trace": trace,
-            },
+            metadata=metadata,
         )
 
     # ------------------------------------------------------------------
@@ -1089,7 +1112,8 @@ class DriftSearchRetriever:
             if state.total_llm_calls >= max_llm_calls:
                 raise _LLMCallLimitReached("max_llm_calls reached")
             state.total_llm_calls += 1
-        response = await self.llm.ainvoke(prompt)
+        with token_stage(f"drift.{phase}"):
+            response = await self.llm.ainvoke(prompt)
         state.phase_tokens[phase] = state.phase_tokens.get(phase, 0) + self.counter.count(
             prompt + response.content
         )

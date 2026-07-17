@@ -286,6 +286,9 @@ class TestFullSearch:
         search = GlobalSearchRetriever(store, llm)
         result = await search.search("query", community_level=None)
         assert "requires" in result.answer.lower()
+        # No LLM call happened before this early return, so nothing was
+        # recorded -- the key must be omitted, not present with value None.
+        assert "token_usage" not in result.metadata
 
     @pytest.mark.asyncio
     async def test_search_empty_reports(self):
@@ -294,6 +297,7 @@ class TestFullSearch:
         search = GlobalSearchRetriever(store, llm)
         result = await search.search("query", community_level=0)
         assert "No community reports" in result.answer
+        assert "token_usage" not in result.metadata
 
     @pytest.mark.asyncio
     async def test_search_all_score_zero(self):

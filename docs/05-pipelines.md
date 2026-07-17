@@ -499,6 +499,48 @@ matches Microsoft GraphRAG level semantics.
 
 ---
 
+## Token usage
+
+Token usage is tracked **by default**. Both `GraphBuilderPipeline` and
+`CommunityPipeline` (and the [search classes](06-search.md)) wrap their `llm`
+internally, open a run scope per call, and surface a `token_usage` summary in
+their result — no setup required. One call in, one usage summary out, scoped to
+exactly that call:
+
+```python
+from recon_graphrag import GraphBuilderPipeline, render_usage_table
+
+pipeline = GraphBuilderPipeline(graph_store=store, llm=llm, embedder=embedder)
+result = await pipeline.build_from_text(text=text, schema=schema)
+
+print(render_usage_table(result["token_usage"]))
+```
+
+```text
+token usage (run 9f3c...):
+  stage                          calls    input   output     total  est
+  construction.describe_entities     4    3,100      800     3,900    0
+  construction.extract              30   21,400    5,200    26,600    0
+  TOTAL                             34   24,500    6,000    30,500    0
+```
+
+Pass `track_token_usage=False` to any pipeline or search constructor to opt out
+entirely.
+
+Stages follow an `area.operation` taxonomy: `construction.*` (extract,
+gleaning, descriptions, entity resolution, schema analysis), `community.*`
+(report, report_repair), plus `retrieval.*` and `drift.*` from the
+[search classes](06-search.md). When a provider omits usage, tokens are
+estimated with tiktoken and counted in the `est` column.
+
+The library does not retain usage history — the default ledger forgets a run
+the moment its result is returned. To persist usage, custom-scope it per web
+request, attach a `JsonlUsageSink`, or track standalone building blocks, see
+[Token usage observability](09-workflows.md#token-usage-observability) in the
+workflows guide.
+
+---
+
 ## Next steps
 
 - Explore the composable building blocks in [Workflows](09-workflows.md).

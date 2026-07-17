@@ -9,6 +9,7 @@ from recon_graphrag.extraction.parser import AssessmentParser, ClaimParser, Grap
 from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.extraction.schema import GraphSchema
 from recon_graphrag.extraction.types import ExtractedClaim, GraphExtraction
+from recon_graphrag.observability import token_stage
 
 
 class LLMGraphExtractor:
@@ -97,7 +98,8 @@ class LLMGraphExtractor:
             text=text,
             entity_ids=entity_ids,
         )
-        response = await self.llm.ainvoke(prompt)
+        with token_stage("construction.claims"):
+            response = await self.llm.ainvoke(prompt)
         return self.claim_parser.parse(
             response.content,
             valid_entity_ids=set(entity_ids),
@@ -108,7 +110,8 @@ class LLMGraphExtractor:
     async def _single_extract(self, text: str, schema: GraphSchema) -> GraphExtraction:
         """Run a single extraction call."""
         prompt = self.prompt_builder.build_prompt(text=text, schema=schema)
-        response = await self.llm.ainvoke(prompt)
+        with token_stage("construction.extract"):
+            response = await self.llm.ainvoke(prompt)
         return self.parser.parse(response.content)
 
     async def _assess(
@@ -118,7 +121,8 @@ class LLMGraphExtractor:
         prompt = self.prompt_builder.build_assessment_prompt(
             text=text, schema=schema, current=current
         )
-        response = await self.llm.ainvoke(prompt)
+        with token_stage("construction.gleaning_assess"):
+            response = await self.llm.ainvoke(prompt)
         return self.assessment_parser.parse(response.content)
 
     async def _continue(
@@ -128,7 +132,8 @@ class LLMGraphExtractor:
         prompt = self.prompt_builder.build_continuation_prompt(
             text=text, schema=schema, current=current
         )
-        response = await self.llm.ainvoke(prompt)
+        with token_stage("construction.gleaning_continue"):
+            response = await self.llm.ainvoke(prompt)
         return self.parser.parse(response.content)
 
     async def extract_all(

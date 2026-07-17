@@ -48,6 +48,7 @@ from recon_graphrag.communities.reports import (
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse
 from recon_graphrag.models.artifacts import CommunityReport, report_to_text
+from recon_graphrag.observability import run_scope, token_stage, usage_delta, usage_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class BuildStats:
     repaired: int = 0
     failed: int = 0
     elapsed_seconds: float = 0.0
+    llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class CommunitySummarizer:
@@ -105,84 +109,91 @@ class CommunitySummarizer:
         Returns:
             Tuple of (results list, build stats).
         """
-        communities = self.graph_store.get_communities(self.graph_name, level=level)
-        if not communities:
-            logger.info("no communities found at level %s", level)
-            return [], BuildStats(level=level)
+        with run_scope():
+            before = usage_snapshot(self.llm)
+            communities = self.graph_store.get_communities(self.graph_name, level=level)
+            if not communities:
+                logger.info("no communities found at level %s", level)
+                return [], BuildStats(level=level)
 
-        start = time.monotonic()
-        stats = BuildStats(level=level)
-        semaphore = asyncio.Semaphore(self.concurrency)
-        results: list[dict] = []
+            start = time.monotonic()
+            stats = BuildStats(level=level)
+            semaphore = asyncio.Semaphore(self.concurrency)
+            results: list[dict] = []
 
-        async def _process_one(comm: dict) -> dict | None:
-            cid = comm["id"]
-            async with semaphore:
-                stats.attempted += 1
+            async def _process_one(comm: dict) -> dict | None:
+                cid = comm["id"]
+                async with semaphore:
+                    stats.attempted += 1
 
-                # Fingerprint-based resume
-                report_context: CommunityContext | None = None
-                input_fingerprint: str | None = None
-                if skip_existing:
-                    report_context = self._fetch_community_context_obj(cid, level)
-                    input_fingerprint = self._report_input_fingerprint(
-                        report_context, cid, level
+                    # Fingerprint-based resume
+                    report_context: CommunityContext | None = None
+                    input_fingerprint: str | None = None
+                    if skip_existing:
+                        report_context = self._fetch_community_context_obj(cid, level)
+                        input_fingerprint = self._report_input_fingerprint(
+                            report_context, cid, level
+                        )
+                        if self._has_existing_report(cid, level, input_fingerprint):
+                            stats.skipped += 1
+                            logger.debug("skipping community %s (report unchanged)", cid)
+                            return None
+
+                    logger.debug(
+                        "reporting community %s (%s entities)",
+                        cid, comm.get("entity_count", 0),
                     )
-                    if self._has_existing_report(cid, level, input_fingerprint):
-                        stats.skipped += 1
-                        logger.debug("skipping community %s (report unchanged)", cid)
-                        return None
-
-                logger.debug(
-                    "reporting community %s (%s entities)",
-                    cid, comm.get("entity_count", 0),
-                )
-                try:
-                    report = await self.generate_report(
-                        cid,
-                        level,
-                        context=report_context,
-                        input_fingerprint=input_fingerprint,
-                    )
-                    report_text = report_to_text(report)
-                    self.graph_store.store_community_report(report, self.graph_name)
-                    stats.succeeded += 1
-                    return {
-                        "id": cid,
-                        "level": level,
-                        "report_text": report_text,
-                        "report": report,
-                    }
-                except Exception as e:
-                    stats.failed += 1
                     try:
-                        self.graph_store.mark_community_report_failed(
-                            self.graph_name,
+                        report = await self.generate_report(
                             cid,
                             level,
-                            str(e),
+                            context=report_context,
+                            input_fingerprint=input_fingerprint,
                         )
-                    except Exception:
-                        pass
-                    logger.warning("error reporting community %s: %s", cid, e)
-                    return None
+                        report_text = report_to_text(report)
+                        self.graph_store.store_community_report(report, self.graph_name)
+                        stats.succeeded += 1
+                        return {
+                            "id": cid,
+                            "level": level,
+                            "report_text": report_text,
+                            "report": report,
+                        }
+                    except Exception as e:
+                        stats.failed += 1
+                        try:
+                            self.graph_store.mark_community_report_failed(
+                                self.graph_name,
+                                cid,
+                                level,
+                                str(e),
+                            )
+                        except Exception:
+                            pass
+                        logger.warning("error reporting community %s: %s", cid, e)
+                        return None
 
-        tasks = [_process_one(comm) for comm in communities]
-        outcomes = await tqdm_asyncio.gather(
-            *tasks,
-            desc=f"Reporting communities (level {level})",
-            disable=None,
-        )
+            tasks = [_process_one(comm) for comm in communities]
+            outcomes = await tqdm_asyncio.gather(
+                *tasks,
+                desc=f"Reporting communities (level {level})",
+                disable=None,
+            )
 
-        for outcome in outcomes:
-            if isinstance(outcome, Exception):
-                stats.failed += 1
-                logger.error("unexpected error reporting community: %s", outcome)
-            elif outcome is not None:
-                results.append(outcome)
+            for outcome in outcomes:
+                if isinstance(outcome, Exception):
+                    stats.failed += 1
+                    logger.error("unexpected error reporting community: %s", outcome)
+                elif outcome is not None:
+                    results.append(outcome)
 
-        stats.elapsed_seconds = time.monotonic() - start
-        return results, stats
+            stats.elapsed_seconds = time.monotonic() - start
+            delta = usage_delta(before, usage_snapshot(self.llm))
+            delta_totals = delta.get("totals", {})
+            stats.llm_calls = delta_totals.get("calls", 0)
+            stats.input_tokens = delta_totals.get("input_tokens", 0)
+            stats.output_tokens = delta_totals.get("output_tokens", 0)
+            return results, stats
 
     def _has_existing_report(
         self,
@@ -279,7 +290,8 @@ class CommunitySummarizer:
         )
 
         # First attempt
-        response: LLMResponse = await self.llm.ainvoke(prompt)
+        with token_stage("community.report"):
+            response: LLMResponse = await self.llm.ainvoke(prompt)
         try:
             report = self._report_parser.parse(
                 response.content,
@@ -302,7 +314,8 @@ class CommunitySummarizer:
                 valid_ids=reference_ids,
                 rubric=self.report_rubric,
             )
-            repair_response = await self.llm.ainvoke(repair_prompt)
+            with token_stage("community.report_repair"):
+                repair_response = await self.llm.ainvoke(repair_prompt)
             try:
                 report = self._report_parser.parse(
                     repair_response.content,

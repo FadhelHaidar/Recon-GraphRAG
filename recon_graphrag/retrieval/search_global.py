@@ -19,6 +19,7 @@ from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.models.types import SearchResult
+from recon_graphrag.observability import run_scope, token_stage, track_usage, usage_snapshot
 
 from recon_graphrag.retrieval.citations import resolve_reference_citations
 from recon_graphrag.retrieval.community_levels import (
@@ -188,9 +189,10 @@ class GlobalSearchRetriever:
         map_concurrency: int = 5,
         max_map_calls: int | None = None,
         allow_general_knowledge: bool = False,
+        track_token_usage: bool = True,
     ):
         self.graph_store = graph_store
-        self.llm = llm
+        self.llm = track_usage(llm) if track_token_usage else llm
         self.map_prompt = map_prompt or DEFAULT_MAP_PROMPT
         self.reduce_prompt = reduce_prompt or DEFAULT_REDUCE_PROMPT
         self.graph_name = graph_name
@@ -219,123 +221,150 @@ class GlobalSearchRetriever:
                 Map LLM calls still run for relevance scoring and reference
                 extraction.
         """
-        start = time.monotonic()
-        diag = GlobalSearchDiagnostics(random_seed=random_seed)
+        with run_scope():
+            start = time.monotonic()
+            diag = GlobalSearchDiagnostics(random_seed=random_seed)
 
-        resolved_level = resolve_community_level(
-            self.graph_store,
-            self.graph_name,
-            community_level,
-        )
-
-        if resolved_level is None:
-            return SearchResult(
-                query=query,
-                mode="global",
-                answer="Global search requires an explicit community level.",
+            resolved_level = resolve_community_level(
+                self.graph_store,
+                self.graph_name,
+                community_level,
             )
 
-        diag.selected_level = resolved_level
-
-        # 1. Read all reports at this level
-        reports = self._read_reports(resolved_level)
-        diag.reports_available = len(reports)
-
-        if not reports:
-            return SearchResult(
-                query=query,
-                mode="global",
-                answer="No community reports found at the specified level.",
-            )
-
-        # 2. Filter failed/empty reports
-        reports = [r for r in reports if r.get("report_text", "").strip()]
-        diag.reports_used = len(reports)
-
-        if not reports:
-            return SearchResult(
-                query=query,
-                mode="global",
-                answer="All community reports at this level are empty.",
-            )
-
-        # 3. Shuffle
-        reports = self._shuffle(reports, random_seed)
-
-        # 4. Batch
-        batches = self._create_batches(query, reports)
-        diag.map_batches = len(batches)
-
-        # Limit map calls if configured
-        if self.max_map_calls and len(batches) > self.max_map_calls:
-            batches = batches[: self.max_map_calls]
-            diag.map_batches = len(batches)
-
-        # 5. Map phase
-        partials = await self._map_phase(query, batches)
-        diag.map_succeeded = sum(1 for p in partials if p.error is None)
-        diag.map_failed = sum(1 for p in partials if p.error is not None)
-
-        # 6. Filter score=0
-        scored = [p for p in partials if p.error is None and p.helpfulness > 0]
-        diag.map_filtered_zero = diag.map_succeeded - len(scored)
-
-        use_general_knowledge = False
-        if not scored:
-            if not self.allow_general_knowledge:
-                diag.elapsed_ms = int((time.monotonic() - start) * 1000)
+            if resolved_level is None:
+                metadata = {}
+                token_usage = usage_snapshot(self.llm)
+                if token_usage is not None:
+                    metadata["token_usage"] = token_usage
                 return SearchResult(
                     query=query,
                     mode="global",
-                    answer="No relevant information found in community reports.",
-                    metadata=_diag_to_dict(diag),
+                    answer="Global search requires an explicit community level.",
+                    metadata=metadata,
                 )
-            use_general_knowledge = True
-            scored = [p for p in partials if p.error is None]
 
-        # 7. Sort by helpfulness DESC
-        scored.sort(key=lambda p: (-p.helpfulness, p.batch_id))
+            diag.selected_level = resolved_level
 
-        # Build context from scored reports
-        context_parts = []
-        for p in scored:
-            context_parts.append(
-                f"[Batch {p.batch_id}] (score: {p.helpfulness})\n{p.answer}"
-            )
-        context = "\n\n---\n\n".join(context_parts)
+            # 1. Read all reports at this level
+            reports = self._read_reports(resolved_level)
+            diag.reports_available = len(reports)
 
-        # Resolve citations from explicit map references and report-derived refs.
-        citations = self._resolve_source_citations(diag, scored, resolved_level)
+            if not reports:
+                metadata = {}
+                token_usage = usage_snapshot(self.llm)
+                if token_usage is not None:
+                    metadata["token_usage"] = token_usage
+                return SearchResult(
+                    query=query,
+                    mode="global",
+                    answer="No community reports found at the specified level.",
+                    metadata=metadata,
+                )
 
-        # 8. Reduce phase (skip when synthesize_response=False)
-        if not synthesize_response:
-            diag.reduce_partials_used = 0
+            # 2. Filter failed/empty reports
+            reports = [r for r in reports if r.get("report_text", "").strip()]
+            diag.reports_used = len(reports)
+
+            if not reports:
+                metadata = {}
+                token_usage = usage_snapshot(self.llm)
+                if token_usage is not None:
+                    metadata["token_usage"] = token_usage
+                return SearchResult(
+                    query=query,
+                    mode="global",
+                    answer="All community reports at this level are empty.",
+                    metadata=metadata,
+                )
+
+            # 3. Shuffle
+            reports = self._shuffle(reports, random_seed)
+
+            # 4. Batch
+            batches = self._create_batches(query, reports)
+            diag.map_batches = len(batches)
+
+            # Limit map calls if configured
+            if self.max_map_calls and len(batches) > self.max_map_calls:
+                batches = batches[: self.max_map_calls]
+                diag.map_batches = len(batches)
+
+            # 5. Map phase
+            partials = await self._map_phase(query, batches)
+            diag.map_succeeded = sum(1 for p in partials if p.error is None)
+            diag.map_failed = sum(1 for p in partials if p.error is not None)
+
+            # 6. Filter score=0
+            scored = [p for p in partials if p.error is None and p.helpfulness > 0]
+            diag.map_filtered_zero = diag.map_succeeded - len(scored)
+
+            use_general_knowledge = False
+            if not scored:
+                if not self.allow_general_knowledge:
+                    diag.elapsed_ms = int((time.monotonic() - start) * 1000)
+                    metadata = _diag_to_dict(diag)
+                    token_usage = usage_snapshot(self.llm)
+                    if token_usage is not None:
+                        metadata["token_usage"] = token_usage
+                    return SearchResult(
+                        query=query,
+                        mode="global",
+                        answer="No relevant information found in community reports.",
+                        metadata=metadata,
+                    )
+                use_general_knowledge = True
+                scored = [p for p in partials if p.error is None]
+
+            # 7. Sort by helpfulness DESC
+            scored.sort(key=lambda p: (-p.helpfulness, p.batch_id))
+
+            # Build context from scored reports
+            context_parts = []
+            for p in scored:
+                context_parts.append(
+                    f"[Batch {p.batch_id}] (score: {p.helpfulness})\n{p.answer}"
+                )
+            context = "\n\n---\n\n".join(context_parts)
+
+            # Resolve citations from explicit map references and report-derived refs.
+            citations = self._resolve_source_citations(diag, scored, resolved_level)
+
+            # 8. Reduce phase (skip when synthesize_response=False)
+            if not synthesize_response:
+                diag.reduce_partials_used = 0
+                diag.elapsed_ms = int((time.monotonic() - start) * 1000)
+                metadata = _diag_to_dict(diag)
+                metadata["synthesize_response"] = False
+                metadata["response_synthesis_skipped"] = True
+                token_usage = usage_snapshot(self.llm)
+                if token_usage is not None:
+                    metadata["token_usage"] = token_usage
+                return SearchResult(
+                    query=query,
+                    mode="global",
+                    answer="",
+                    context=context,
+                    metadata=metadata,
+                    citations=citations,
+                )
+
+            answer = await self._reduce_phase(query, scored, use_general_knowledge=use_general_knowledge)
+            diag.reduce_partials_used = len(scored)
+
             diag.elapsed_ms = int((time.monotonic() - start) * 1000)
+
             metadata = _diag_to_dict(diag)
-            metadata["synthesize_response"] = False
-            metadata["response_synthesis_skipped"] = True
+            token_usage = usage_snapshot(self.llm)
+            if token_usage is not None:
+                metadata["token_usage"] = token_usage
             return SearchResult(
                 query=query,
                 mode="global",
-                answer="",
+                answer=answer,
                 context=context,
                 metadata=metadata,
                 citations=citations,
             )
-
-        answer = await self._reduce_phase(query, scored, use_general_knowledge=use_general_knowledge)
-        diag.reduce_partials_used = len(scored)
-
-        diag.elapsed_ms = int((time.monotonic() - start) * 1000)
-
-        return SearchResult(
-            query=query,
-            mode="global",
-            answer=answer,
-            context=context,
-            metadata=_diag_to_dict(diag),
-            citations=citations,
-        )
 
     # ------------------------------------------------------------------
     # Report reading
@@ -627,7 +656,8 @@ class GlobalSearchRetriever:
                     query=query, batch_text=batch.text
                 )
                 try:
-                    response = await self.llm.ainvoke(prompt)
+                    with token_stage("retrieval.global_map"):
+                        response = await self.llm.ainvoke(prompt)
                     data = self._parse_map_response(response.content)
                     return PartialAnswer(
                         batch_id=batch.batch_id,
@@ -741,5 +771,6 @@ class GlobalSearchRetriever:
         prompt = reduce_prompt.format(
             query=query, partial_text=partial_text
         )
-        response = await self.llm.ainvoke(prompt)
+        with token_stage("retrieval.global_reduce"):
+            response = await self.llm.ainvoke(prompt)
         return response.content
