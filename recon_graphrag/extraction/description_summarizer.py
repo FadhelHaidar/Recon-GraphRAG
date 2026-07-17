@@ -17,6 +17,7 @@ from recon_graphrag.graphdb.entity_resolution_context import (
     STANDARD_CONTEXT_FIELDS,
 )
 from recon_graphrag.llm.base import BaseLLM
+from recon_graphrag.observability import token_stage
 
 # Node properties that are pipeline bookkeeping rather than domain facts;
 # everything else is user-schema data worth showing to the summary LLM.
@@ -47,13 +48,14 @@ class DescriptionSummarizer:
         graph_store: GraphStore,
         graph_name: str,
         concurrency: int = 5,
+        prompt_builder: SchemaPromptBuilder | None = None,
     ):
         self.llm = llm
         self.graph_store = graph_store
         self.graph_name = graph_name
         self.concurrency = max(int(concurrency), 1)
         self.parser = DescriptionSummaryParser()
-        self.prompts = SchemaPromptBuilder()
+        self.prompts = prompt_builder or SchemaPromptBuilder()
 
     async def summarize_entities(self, limit: int = 500) -> dict:
         return await self._summarize_loop(
@@ -129,7 +131,13 @@ class DescriptionSummarizer:
 
         async def _summarize(item: dict) -> dict:
             async with semaphore:
-                response = await self.llm.ainvoke(prompt_builder(item))
+                stage = (
+                    "construction.describe_entities"
+                    if label == "entity"
+                    else "construction.describe_relationships"
+                )
+                with token_stage(stage):
+                    response = await self.llm.ainvoke(prompt_builder(item))
                 summary = self._parse_summary(response.content)
                 return {
                     "id": item["id"],

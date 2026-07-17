@@ -296,3 +296,28 @@ class TestContextEnrichment:
         ]
         enriched = enrich_context_with_claims(context, bad_rows)
         assert len(enriched.claims) == 0
+
+class TestCustomReportPrompt:
+    def _build(self, **overrides):
+        kwargs = dict(
+            community_id="c1",
+            level=0,
+            context="ctx",
+            reference_ids=["person:alice"],
+        )
+        kwargs.update(overrides)
+        return build_report_prompt(**kwargs)
+
+    def test_pure_string_gets_default_body_appended(self):
+        prompt = self._build(prompt_template="You are a security analyst.")
+        assert prompt.startswith("You are a security analyst.")
+        assert "## Community context" in prompt
+        assert "JSON format:" in prompt
+
+    def test_partial_template_raises(self):
+        with pytest.raises(ValueError, match="missing required placeholders"):
+            self._build(prompt_template="Report on {context} only.")
+
+    def test_placeholder_like_data_is_not_expanded(self):
+        prompt = self._build(context="Entity note: {min_rating} appears literally.")
+        assert "Entity note: {min_rating} appears literally." in prompt

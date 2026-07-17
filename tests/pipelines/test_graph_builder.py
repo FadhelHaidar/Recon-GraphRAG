@@ -15,7 +15,10 @@ from recon_graphrag.extraction.schema import (
 from recon_graphrag.extraction.chunking import TextChunker
 from recon_graphrag.graphdb.memgraph.store import MemgraphGraphStore
 from recon_graphrag.graphdb.neo4j.store import Neo4jGraphStore
+from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
+from recon_graphrag.observability import UsageTrackingLLM, track_usage
 from recon_graphrag.pipelines.graphrag_pipeline import GraphBuilderPipeline
+
 
 
 class FakeGraphStore:
@@ -131,7 +134,7 @@ def fake_llm():
             {"source_id": "p1", "target_id": "m1", "type": "DIRECTED"}
         ]
     }
-    '''))
+    ''', usage=None))
     return llm
 
 
@@ -301,6 +304,49 @@ async def test_build_from_documents_mixed_text_and_pages(
     assert fake_writer.write_graph_document.call_count == 2
     assert results[0]["extraction"]["chunks"] == 1
     assert results[1]["extraction"]["chunks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_build_from_documents_token_usage_is_per_document(
+    movie_schema, fake_llm, fake_embedder, fake_writer
+):
+    """token_usage on each result must reflect only that document's own
+    calls, not the whole batch's total stamped onto every result."""
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=fake_llm,
+        embedder=fake_embedder,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+        summarize_descriptions=False,
+    )
+
+    long_text = "Alice directed Inception in 2010 with Christopher Nolan. " * 5
+    short_text = "Bob acted in a movie."
+
+    results = await pipeline.build_from_documents(
+        [
+            {"text": long_text, "metadata": {"source": "long-doc"}},
+            {"text": short_text, "metadata": {"source": "short-doc"}},
+        ],
+        schema=movie_schema,
+        chunk_size=15,
+        chunk_overlap=5,
+        chunk_unit="characters",
+        max_gleanings=0,
+    )
+
+    assert len(results) == 2
+    long_result, short_result = results
+    assert long_result["extraction"]["chunks"] > short_result["extraction"]["chunks"]
+
+    long_calls = long_result["token_usage"]["totals"]["calls"]
+    short_calls = short_result["token_usage"]["totals"]["calls"]
+    assert long_calls == long_result["extraction"]["chunks"]
+    assert short_calls == short_result["extraction"]["chunks"]
+    assert long_calls != short_calls
 
 
 @pytest.mark.asyncio
@@ -514,11 +560,13 @@ async def test_hybrid_entity_resolution_forwards_llm_and_embedder(movie_schema):
 
     await pipeline._resolve_entities()
 
+    # pipeline.llm is llm auto-wrapped with token-usage tracking (default
+    # on); entity resolution should forward whatever the pipeline holds.
     assert store.resolve_kwargs == {
         "strategy": "hybrid",
         "graph_name": "entity-graph",
         "embedder": embedder,
-        "llm": llm,
+        "llm": pipeline.llm,
         "aliases": aliases,
         "llm_guidance": guidance,
         "allow_ai_auto_merge": True,
@@ -594,7 +642,7 @@ async def test_concurrency_limit_respected(
             active -= 1
         return MagicMock(content='{"nodes": [], "relationships": []}')
 
-    pipeline.llm.ainvoke = AsyncMock(side_effect=tracked_invoke)
+    pipeline.llm.inner.ainvoke = AsyncMock(side_effect=tracked_invoke)
 
     await pipeline._extract_and_write_chunks(
         document_id="doc:test",
@@ -623,7 +671,7 @@ async def test_partial_extraction_failure_continues(
         call_count += 1
         if call_count == 2:
             raise RuntimeError("provider error")
-        return MagicMock(content='{"nodes": [], "relationships": []}')
+        return MagicMock(content='{"nodes": [], "relationships": []}', usage=None)
 
     llm.ainvoke = AsyncMock(side_effect=fail_second_extraction)
 
@@ -772,3 +820,109 @@ def test_pipeline_rerun_does_not_inflate_assembled_records():
     assert len(first.entities) == len(second.entities) == 2
     assert len(first.relationships) == len(second.relationships) == 1
     assert len(first.evidence_links) == len(second.evidence_links) == 2
+
+
+@pytest.mark.asyncio
+async def test_build_from_text_uses_custom_string_prompts(
+    movie_schema, fake_llm, fake_embedder, fake_writer
+):
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=fake_llm,
+        embedder=fake_embedder,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+        summarize_descriptions=False,
+        extraction_prompt="CUSTOM EXTRACTION INSTRUCTION",
+    )
+
+    await pipeline.build_from_text(
+        "Alice directed Inception.",
+        metadata={"source": "test"},
+        schema=movie_schema,
+        max_gleanings=0,
+    )
+
+    prompt = fake_llm.ainvoke.call_args[0][0]
+    assert "CUSTOM EXTRACTION INSTRUCTION" in prompt
+
+
+def test_pipeline_configures_prompt_builder_from_strings():
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=MagicMock(),
+        embedder=MagicMock(),
+        extraction_prompt="E",
+        assessment_prompt="A",
+        continuation_prompt="C",
+        claim_prompt="CL",
+        entity_summary_prompt="ES",
+        relationship_summary_prompt="RS",
+    )
+
+    builder = pipeline.prompt_builder
+    assert builder.extraction_prompt == "E"
+    assert builder.assessment_prompt == "A"
+    assert builder.continuation_prompt == "C"
+    assert builder.claim_prompt == "CL"
+    assert builder.entity_summary_prompt == "ES"
+    assert builder.relationship_summary_prompt == "RS"
+    assert pipeline.extractor.prompt_builder is builder
+
+
+@pytest.mark.asyncio
+async def test_description_summarizer_receives_configured_prompt_builder(
+    movie_schema, fake_llm, fake_embedder, fake_writer
+):
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=fake_llm,
+        embedder=fake_embedder,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+        summarize_descriptions=True,
+        entity_summary_prompt="CUSTOM ENTITY SUMMARY",
+        relationship_summary_prompt="CUSTOM RELATIONSHIP SUMMARY",
+    )
+
+    # The summarizer receives the builder configured from the string prompts.
+    summarizer = DescriptionSummarizer(
+        pipeline.llm,
+        pipeline.graph_store,
+        pipeline.graph_name,
+        prompt_builder=pipeline.prompt_builder,
+    )
+    assert summarizer.prompts.entity_summary_prompt == "CUSTOM ENTITY SUMMARY"
+    assert summarizer.prompts.relationship_summary_prompt == "CUSTOM RELATIONSHIP SUMMARY"
+
+
+def test_token_usage_tracking_default_on(fake_embedder, fake_writer):
+    """Token-usage tracking is on by default and can be opted out of; a
+    pre-wrapped LLM is never double-wrapped (track_usage's idempotency)."""
+    store = FakeGraphStore()
+
+    default_pipeline = GraphBuilderPipeline(
+        graph_store=store, llm=MagicMock(), embedder=fake_embedder, graph_writer=fake_writer,
+    )
+    assert isinstance(default_pipeline.llm, UsageTrackingLLM)
+    # The extractor must share the exact same wrapped instance, not the
+    # original unwrapped llm, or extraction calls go untracked.
+    assert default_pipeline.extractor.llm is default_pipeline.llm
+
+    opted_out_pipeline = GraphBuilderPipeline(
+        graph_store=store, llm=MagicMock(), embedder=fake_embedder, graph_writer=fake_writer,
+        track_token_usage=False,
+    )
+    assert not isinstance(opted_out_pipeline.llm, UsageTrackingLLM)
+
+    pre_wrapped = track_usage(MagicMock())
+    already_wrapped_pipeline = GraphBuilderPipeline(
+        graph_store=store, llm=pre_wrapped, embedder=fake_embedder, graph_writer=fake_writer,
+    )
+    assert already_wrapped_pipeline.llm is pre_wrapped
+

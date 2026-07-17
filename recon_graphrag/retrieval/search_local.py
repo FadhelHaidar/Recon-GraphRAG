@@ -18,6 +18,7 @@ from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM
 from recon_graphrag.models.artifacts import Citation
 from recon_graphrag.models.types import SearchResult
+from recon_graphrag.observability import run_scope, token_stage, track_usage, usage_snapshot
 
 from recon_graphrag.retrieval.citations import resolve_chunk_citations
 from recon_graphrag.retrieval.community_levels import CommunityLevelSelector
@@ -54,9 +55,10 @@ class LocalSearchRetriever:
         graph_name: str = "entity-graph",
         use_mixed_context: bool = True,
         top_k_relationships: int = 10,
+        track_token_usage: bool = True,
     ):
         self.graph_store = graph_store
-        self.llm = llm
+        self.llm = track_usage(llm) if track_token_usage else llm
         self.embedder = embedder
         self.retrieval_query = retrieval_query
         self.answer_prompt = answer_prompt or DEFAULT_ANSWER_PROMPT
@@ -113,51 +115,61 @@ class LocalSearchRetriever:
             token_budget: Total token budget for mixed context (only used
                 when use_mixed_context=True).
         """
-        retriever_result = await self._retriever.search(
-            query_text=query,
-            query_vector=query_vector,
-            top_k=top_k,
-            effective_search_ratio=effective_search_ratio,
-            query_params=query_params,
-            ranker=ranker,
-            alpha=alpha,
-        )
-
-        if self.use_mixed_context:
-            return await self._search_mixed(
-                query=query,
-                retriever_result=retriever_result,
-                synthesize_response=synthesize_response,
-                community_level=community_level,
-                token_budget=token_budget,
+        with run_scope():
+            retriever_result = await self._retriever.search(
+                query_text=query,
+                query_vector=query_vector,
+                top_k=top_k,
+                effective_search_ratio=effective_search_ratio,
+                query_params=query_params,
+                ranker=ranker,
+                alpha=alpha,
             )
 
-        citations = self._resolve_citations(retriever_result)
-        context = self._format_context(
-            retriever_result,
-            citations=citations if synthesize_citation_metadata else None,
-            citation_metadata_keys=synthesis_metadata_keys,
-        )
-        if not synthesize_response:
+            if self.use_mixed_context:
+                return await self._search_mixed(
+                    query=query,
+                    retriever_result=retriever_result,
+                    synthesize_response=synthesize_response,
+                    community_level=community_level,
+                    token_budget=token_budget,
+                )
+
+            citations = self._resolve_citations(retriever_result)
+            context = self._format_context(
+                retriever_result,
+                citations=citations if synthesize_citation_metadata else None,
+                citation_metadata_keys=synthesis_metadata_keys,
+            )
+            if not synthesize_response:
+                token_usage = usage_snapshot(self.llm)
+                metadata = {
+                    "synthesize_response": False,
+                    "response_synthesis_skipped": True,
+                }
+                if token_usage is not None:
+                    metadata["token_usage"] = token_usage
+                return SearchResult(
+                    query=query,
+                    mode="local",
+                    answer="",
+                    context=context,
+                    citations=citations,
+                    metadata=metadata,
+                )
+            answer = await self._generate_answer(query, context)
+            token_usage = usage_snapshot(self.llm)
+            metadata = {}
+            if token_usage is not None:
+                metadata["token_usage"] = token_usage
             return SearchResult(
                 query=query,
                 mode="local",
-                answer="",
+                answer=answer,
                 context=context,
                 citations=citations,
-                metadata={
-                    "synthesize_response": False,
-                    "response_synthesis_skipped": True,
-                },
+                metadata=metadata,
             )
-        answer = await self._generate_answer(query, context)
-        return SearchResult(
-            query=query,
-            mode="local",
-            answer=answer,
-            context=context,
-            citations=citations,
-        )
 
     async def _search_mixed(
         self,
@@ -194,33 +206,41 @@ class LocalSearchRetriever:
         )
 
         if not synthesize_response:
+            token_usage = usage_snapshot(self.llm)
+            metadata = {
+                "synthesize_response": False,
+                "response_synthesis_skipped": True,
+                "mixed_context": True,
+                "used_tokens": mixed.used_tokens,
+                "max_tokens": mixed.max_tokens,
+            }
+            if token_usage is not None:
+                metadata["token_usage"] = token_usage
             return SearchResult(
                 query=query,
                 mode="local",
                 answer="",
                 context=mixed.context,
                 citations=mixed.citations,
-                metadata={
-                    "synthesize_response": False,
-                    "response_synthesis_skipped": True,
-                    "mixed_context": True,
-                    "used_tokens": mixed.used_tokens,
-                    "max_tokens": mixed.max_tokens,
-                },
+                metadata=metadata,
             )
 
         answer = await self._generate_answer(query, mixed.context)
+        token_usage = usage_snapshot(self.llm)
+        metadata = {
+            "mixed_context": True,
+            "used_tokens": mixed.used_tokens,
+            "max_tokens": mixed.max_tokens,
+        }
+        if token_usage is not None:
+            metadata["token_usage"] = token_usage
         return SearchResult(
             query=query,
             mode="local",
             answer=answer,
             context=mixed.context,
             citations=mixed.citations,
-            metadata={
-                "mixed_context": True,
-                "used_tokens": mixed.used_tokens,
-                "max_tokens": mixed.max_tokens,
-            },
+            metadata=metadata,
         )
 
     def _format_context(
@@ -252,7 +272,8 @@ class LocalSearchRetriever:
     async def _generate_answer(self, query: str, context: str) -> str:
         """Generate answer from context using LLM."""
         prompt = self.answer_prompt.format(query=query, context=context)
-        response = await self.llm.ainvoke(prompt)
+        with token_stage("retrieval.local"):
+            response = await self.llm.ainvoke(prompt)
         return response.content
 
 

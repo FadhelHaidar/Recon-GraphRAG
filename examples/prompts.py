@@ -1,7 +1,20 @@
 """Movie industry domain-specific prompts.
 
-Override the SDK's neutral defaults with film analyst language.
+Override the SDK's neutral defaults with film analyst language. The
+build-time prompts (``EXTRACTION_PROMPT``, ``COMMUNITY_REPORT_PROMPT``) are
+plain instruction strings — the backend appends the standard schema, rules,
+JSON format, and rubric sections so parsing keeps working. The query-time
+prompts are full templates used by the retrieval modes.
 """
+
+EXTRACTION_PROMPT = """You are a film industry analyst cataloging the movie business.
+Extract every film-industry entity mentioned in the text — movies, people (directors, actors, writers, producers, composers, cinematographers), studios, awards, characters, franchises, TV series, genres, themes, techniques, locations, historical events, reviews, and occupations — along with the connections between them.
+Capture casting and crew credits, production and distribution deals, award wins and nominations, thematic and stylistic links, and critical reception.
+Stick to facts explicitly supported by the text; do not infer connections that are not stated."""
+
+COMMUNITY_REPORT_PROMPT = """You are a film industry analyst writing a briefing on a cluster of closely connected movies, people, studios, and other film-industry entities.
+Identify what unites the cluster — a franchise, a creative circle, a genre movement, a studio slate, an awards-season cohort, or a shared style — and highlight the most important players, films, and connections.
+Write for an entertainment-industry reader in plain language."""
 
 LOCAL_ANSWER_PROMPT = """You are a film industry analyst. Below are relevant findings from our movie database.
 

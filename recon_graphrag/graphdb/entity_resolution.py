@@ -20,6 +20,7 @@ from recon_graphrag.graphdb.entity_resolution_context import (
     build_entity_profiles,
     conflict_for_group,
 )
+from recon_graphrag.observability import token_stage
 
 
 _ORG_SUFFIXES = [
@@ -353,7 +354,8 @@ class BaseEntityResolver(ABC):
                         f"the description.\n\n{deterministic}"
                     )
                     try:
-                        response = await llm.ainvoke(prompt)
+                        with token_stage("construction.entity_resolution"):
+                            response = await llm.ainvoke(prompt)
                         summary = response.content.strip()
                         if not summary:
                             raise ValueError("empty entity description summary")
@@ -870,7 +872,8 @@ class BaseEntityResolver(ABC):
                 )
                 prompt = self._build_llm_review_prompt(rg, aliases, llm_guidance)
                 try:
-                    response = await llm.ainvoke(prompt)
+                    with token_stage("construction.entity_resolution"):
+                        response = await llm.ainvoke(prompt)
                     parsed = self._parse_llm_json(response.content)
                     confidence = parsed.get("confidence")
                     rg["scores"]["llm"] = confidence

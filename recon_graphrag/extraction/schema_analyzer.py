@@ -20,6 +20,7 @@ from typing import Iterable
 from recon_graphrag.extraction.parser import GraphExtractionParser
 from recon_graphrag.extraction.schema import GraphSchema, build_schema, schema_to_dict
 from recon_graphrag.llm.base import BaseLLM
+from recon_graphrag.observability import token_stage
 from recon_graphrag.utils.tokens import TiktokenTokenCounter, TokenCounter
 
 
@@ -221,11 +222,13 @@ def _hint_section(hint: str) -> str:
 
 
 def _invoke_and_parse(llm: BaseLLM, prompt: str) -> GraphSchema:
-    response = llm.invoke(prompt)
+    with token_stage("construction.schema_analysis"):
+        response = llm.invoke(prompt)
     try:
         return _parse_schema(response.content)
     except json.JSONDecodeError:
-        response = llm.invoke(prompt + _RETRY_SUFFIX)
+        with token_stage("construction.schema_analysis"):
+            response = llm.invoke(prompt + _RETRY_SUFFIX)
         try:
             return _parse_schema(response.content)
         except json.JSONDecodeError as err:
@@ -235,11 +238,13 @@ def _invoke_and_parse(llm: BaseLLM, prompt: str) -> GraphSchema:
 
 
 async def _ainvoke_and_parse(llm: BaseLLM, prompt: str) -> GraphSchema:
-    response = await llm.ainvoke(prompt)
+    with token_stage("construction.schema_analysis"):
+        response = await llm.ainvoke(prompt)
     try:
         return _parse_schema(response.content)
     except json.JSONDecodeError:
-        response = await llm.ainvoke(prompt + _RETRY_SUFFIX)
+        with token_stage("construction.schema_analysis"):
+            response = await llm.ainvoke(prompt + _RETRY_SUFFIX)
         try:
             return _parse_schema(response.content)
         except json.JSONDecodeError as err:

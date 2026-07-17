@@ -911,6 +911,15 @@ Common keys across modes:
 | `mixed_context` | local | `True` when `use_mixed_context` was enabled for this search |
 | `used_tokens` | local | Tokens used by `MixedContextBuilder` (only when `use_mixed_context=True`) |
 | `max_tokens` | local | Token budget for mixed context (only when `use_mixed_context=True`) |
+| `token_usage` | all | LLM token usage for this search, by stage (see below) |
+
+Token usage is tracked **by default**: every search surfaces a `token_usage`
+summary under `result.metadata["token_usage"]` (`retrieval.*` and `drift.*`
+stages), the same shape pipelines return. Render it with `render_usage_table`,
+and pass `track_token_usage=False` to the retriever constructor to opt out. See
+[Token usage](05-pipelines.md#token-usage) for the full explanation and the
+[workflows guide](09-workflows.md#token-usage-observability) for sinks,
+per-request scoping, and cross-call ledgers.
 
 Diagnostics are read-only. Use them for logging, dashboards, or tuning search
 parameters.

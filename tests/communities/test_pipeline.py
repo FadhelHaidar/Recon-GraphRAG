@@ -138,3 +138,45 @@ async def test_build_filters_levels():
     assert result["reports"] == 2
     assert result["level_stats"][0]["level"] == 1
     assert result["level_stats"][1]["level"] == 0
+
+
+@pytest.mark.asyncio
+async def test_build_forwards_report_prompt_to_summarizer():
+    communities = [
+        {"id": "c1", "level": 0, "entity_count": 1},
+    ]
+    store = FakeGraphStoreWithCommunities(communities)
+
+    class CapturingLLM:
+        def __init__(self):
+            self.prompts = []
+
+        async def ainvoke(self, prompt):
+            from recon_graphrag.llm.base import LLMResponse
+            self.prompts.append(prompt)
+            return LLMResponse(content=json.dumps({
+                "title": "T",
+                "summary": "S",
+                "findings": [{
+                    "description": "F",
+                    "references": [{
+                        "target_id": "person:alice",
+                        "target_type": "entity",
+                    }],
+                }],
+            }))
+
+    llm = CapturingLLM()
+    pipeline = CommunityPipeline(
+        graph_store=store,
+        llm=llm,
+        relationship_types=["ACTED_IN"],
+        graph_name="test-graph",
+        report_prompt="You are a security analyst. Identify risks.",
+    )
+
+    await pipeline.build()
+
+    assert llm.prompts
+    assert "You are a security analyst. Identify risks." in llm.prompts[0]
+

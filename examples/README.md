@@ -54,6 +54,16 @@ This separation lets you extract once and experiment with multiple backends with
 
 Each page in `data.py` carries a `metadata` dict with `source`, `topic`, and `page_index` fields. This metadata is passed through the chunking step into the assembled `GraphDocument` so the artifact preserves provenance for each part of the corpus.
 
+## Custom prompts
+
+`prompts.py` overrides the SDK's neutral defaults with film-analyst language at every stage:
+
+- **Extraction** (`extract.py`) — `EXTRACTION_PROMPT` is passed to `LLMGraphExtractor` via `SchemaPromptBuilder`.
+- **Community reports** (`communities.py`) — `COMMUNITY_REPORT_PROMPT` is passed to `CommunityPipeline` as `report_prompt`.
+- **Retrieval** (`search.py`) — full prompt templates for the local, global, and DRIFT answer stages.
+
+The build-time prompts are plain instruction strings; the backend appends the standard schema, rules, JSON format, and rubric sections. Run `python custom_prompts.py` for a standalone tour of the custom-prompt API that prints the exact prompts sent to the LLM.
+
 ## Note
 
 This directory is sample code for hands-on experimentation. The test suite does not import from `examples/`; integration tests use their own test-owned factories under `tests/integration/factories.py`.

@@ -18,6 +18,20 @@ from recon_graphrag.retrieval.drift_types import (
 
 # Providers
 from recon_graphrag.llm import create_llm, BaseLLM, LLMResponse, LLMUsage
+from recon_graphrag.observability import (
+    UsageTrackingLLM,
+    TokenUsageEvent,
+    TokenUsageLedger,
+    token_stage,
+    run_scope,
+    track_usage,
+    usage_snapshot,
+    usage_delta,
+    render_usage_table,
+    JsonlUsageSink,
+    load_usage_events,
+    summarize_events,
+)
 from recon_graphrag.embeddings import (
     create_embedder,
     BaseEmbedder,
@@ -41,6 +55,7 @@ from recon_graphrag.extraction.schema import (
     schema_to_dict,
 )
 from recon_graphrag.extraction.schema_analyzer import aanalyze_schema, analyze_schema
+from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 
 # Structured data
 from recon_graphrag.extraction.structured import (
@@ -95,6 +110,19 @@ __all__ = [
     "CommunityReportEmbedder",
     "EntityEmbedder",
     "ModelParamsEmbedder",
+    # Observability
+    "UsageTrackingLLM",
+    "TokenUsageEvent",
+    "TokenUsageLedger",
+    "token_stage",
+    "run_scope",
+    "track_usage",
+    "usage_snapshot",
+    "usage_delta",
+    "render_usage_table",
+    "JsonlUsageSink",
+    "load_usage_events",
+    "summarize_events",
     # Graph store
     "GraphStore",
     "Neo4jGraphStore",
@@ -111,6 +139,7 @@ __all__ = [
     "load_schema_json",
     "analyze_schema",
     "aanalyze_schema",
+    "SchemaPromptBuilder",
     # Structured data
     "ColumnEntity",
     "RowMapping",
