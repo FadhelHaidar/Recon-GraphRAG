@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.9.1...v0.10.0) (2026-07-17)
+
+
+### Features
+
+* custom prompts + token-usage observability ([#85](https://github.com/FadhelHaidar/Recon-GraphRAG/issues/85)) ([0e0b762](https://github.com/FadhelHaidar/Recon-GraphRAG/commit/0e0b762045c94b27d1f1e4533b8dcbfa7337c09b))
+
 ## [0.9.1](https://github.com/FadhelHaidar/Recon-GraphRAG/compare/v0.9.0...v0.9.1) (2026-07-11)
 
 
