@@ -293,6 +293,47 @@ two non-empty unequal values do. Blocked candidates are returned in
 `review_groups` with `decision="blocked"` and are not sent to the LLM or
 auto-merged.
 
+### Custom prompts
+
+Each LLM prompt the pipeline builds can be customized with a plain string.
+The string becomes the user-facing instruction; the backend appends the
+standard structural sections (allowed schema, rules, JSON format, source
+text) so parsing keeps working.
+
+```python
+pipeline = GraphBuilderPipeline(
+    graph_store=store,
+    llm=llm,
+    embedder=embedder,
+    extraction_prompt="You are a legal analyst. Extract parties and obligations from the text.",
+    assessment_prompt="Review whether you missed any important legal entities.",
+    continuation_prompt="Extract only the missing legal entities.",
+    claim_prompt="Extract claims about the known entities.",
+    entity_summary_prompt="Summarize this legal entity in one sentence.",
+    relationship_summary_prompt="Summarize this legal relationship in one sentence.",
+)
+```
+
+Every parameter defaults to `None`, which keeps the existing default prompt
+unchanged. Each string may include optional placeholders to control where
+the backend inserts content; a placeholder that is present is substituted
+in place, and one that is absent is appended in the standard location.
+
+| Parameter | Used for | Optional placeholders |
+| --- | --- | --- |
+| `extraction_prompt` | Initial graph extraction per chunk | `{text}` |
+| `assessment_prompt` | Gleaning: "did you miss anything?" check | `{text}`, `{existing}` |
+| `continuation_prompt` | Gleaning: extract only missed items | `{text}`, `{existing}` |
+| `claim_prompt` | Claim extraction (`extract_claims=True`) | `{text}`, `{entity_ids}` |
+| `entity_summary_prompt` | Description summarization of entities | `{descriptions}`, `{entity_name}`, `{entity_type}` |
+| `relationship_summary_prompt` | Description summarization of relationships | `{descriptions}`, `{source}`, `{target}`, `{rel_type}` |
+
+To include a literal brace, double it (`{{` / `}}`). For full control over
+prompt structure, subclass `SchemaPromptBuilder` and pass it to
+`LLMGraphExtractor` or `DescriptionSummarizer` directly. See
+[custom_prompts.py](../examples/custom_prompts.py) for a runnable example
+that prints the generated prompts.
+
 ### Gleaning
 
 By default, the extractor makes a single LLM call per chunk. Set
@@ -416,6 +457,7 @@ result = await community.build(level=0)
 | `relationship_weight_property` | Name of the numeric relationship property to use as the Leiden edge weight, for example `"weight"`. Defaults to `"weight"`. Set to `None` to run Neo4j unweighted; Memgraph always uses `"weight"`. |
 | `random_seed` | Random seed for deterministic Neo4j community detection. |
 | `report_rubric` | Optional rating rubric for structured reports. |
+| `report_prompt` | Optional custom report prompt string. A simple instruction (e.g. `"You are a security analyst. Identify risks in this community."`) gets the standard structured body (community context, reference allowlist, rubric, JSON format) appended. A full template must include all placeholders in `recon_graphrag.communities.reports.REQUIRED_REPORT_PLACEHOLDERS`; a partial template raises `ValueError` at construction. |
 | `summarize_concurrency` | Maximum number of community reports to generate in parallel. Defaults to `1`. Increase for faster community builds when the LLM provider supports high throughput. |
 | `skip_existing` | Skip community reports whose input fingerprint has not changed. |
 | `max_context_tokens` | Maximum tokens for community context passed to the LLM. Degree-ranked context is greedily packed to fit this budget. Defaults to `8000`. Set to `None` to include all context without budgeting. |

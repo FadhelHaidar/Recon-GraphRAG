@@ -15,7 +15,9 @@ from recon_graphrag.extraction.schema import (
 from recon_graphrag.extraction.chunking import TextChunker
 from recon_graphrag.graphdb.memgraph.store import MemgraphGraphStore
 from recon_graphrag.graphdb.neo4j.store import Neo4jGraphStore
+from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
 from recon_graphrag.pipelines.graphrag_pipeline import GraphBuilderPipeline
+
 
 
 class FakeGraphStore:
@@ -772,3 +774,83 @@ def test_pipeline_rerun_does_not_inflate_assembled_records():
     assert len(first.entities) == len(second.entities) == 2
     assert len(first.relationships) == len(second.relationships) == 1
     assert len(first.evidence_links) == len(second.evidence_links) == 2
+
+
+@pytest.mark.asyncio
+async def test_build_from_text_uses_custom_string_prompts(
+    movie_schema, fake_llm, fake_embedder, fake_writer
+):
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=fake_llm,
+        embedder=fake_embedder,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+        summarize_descriptions=False,
+        extraction_prompt="CUSTOM EXTRACTION INSTRUCTION",
+    )
+
+    await pipeline.build_from_text(
+        "Alice directed Inception.",
+        metadata={"source": "test"},
+        schema=movie_schema,
+        max_gleanings=0,
+    )
+
+    prompt = fake_llm.ainvoke.call_args[0][0]
+    assert "CUSTOM EXTRACTION INSTRUCTION" in prompt
+
+
+def test_pipeline_configures_prompt_builder_from_strings():
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=MagicMock(),
+        embedder=MagicMock(),
+        extraction_prompt="E",
+        assessment_prompt="A",
+        continuation_prompt="C",
+        claim_prompt="CL",
+        entity_summary_prompt="ES",
+        relationship_summary_prompt="RS",
+    )
+
+    builder = pipeline.prompt_builder
+    assert builder.extraction_prompt == "E"
+    assert builder.assessment_prompt == "A"
+    assert builder.continuation_prompt == "C"
+    assert builder.claim_prompt == "CL"
+    assert builder.entity_summary_prompt == "ES"
+    assert builder.relationship_summary_prompt == "RS"
+    assert pipeline.extractor.prompt_builder is builder
+
+
+@pytest.mark.asyncio
+async def test_description_summarizer_receives_configured_prompt_builder(
+    movie_schema, fake_llm, fake_embedder, fake_writer
+):
+    store = FakeGraphStore()
+    pipeline = GraphBuilderPipeline(
+        graph_store=store,
+        llm=fake_llm,
+        embedder=fake_embedder,
+        graph_writer=fake_writer,
+        perform_entity_resolution=False,
+        embed_entities=False,
+        summarize_descriptions=True,
+        entity_summary_prompt="CUSTOM ENTITY SUMMARY",
+        relationship_summary_prompt="CUSTOM RELATIONSHIP SUMMARY",
+    )
+
+    # The summarizer receives the builder configured from the string prompts.
+    summarizer = DescriptionSummarizer(
+        pipeline.llm,
+        pipeline.graph_store,
+        pipeline.graph_name,
+        prompt_builder=pipeline.prompt_builder,
+    )
+    assert summarizer.prompts.entity_summary_prompt == "CUSTOM ENTITY SUMMARY"
+    assert summarizer.prompts.relationship_summary_prompt == "CUSTOM RELATIONSHIP SUMMARY"
+

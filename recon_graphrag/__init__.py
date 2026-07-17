@@ -41,6 +41,7 @@ from recon_graphrag.extraction.schema import (
     schema_to_dict,
 )
 from recon_graphrag.extraction.schema_analyzer import aanalyze_schema, analyze_schema
+from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 
 # Structured data
 from recon_graphrag.extraction.structured import (
@@ -111,6 +112,7 @@ __all__ = [
     "load_schema_json",
     "analyze_schema",
     "aanalyze_schema",
+    "SchemaPromptBuilder",
     # Structured data
     "ColumnEntity",
     "RowMapping",

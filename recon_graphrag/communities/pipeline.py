@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from recon_graphrag.communities.reports import ReportRubric
+from recon_graphrag.communities.reports import ReportRubric, validate_report_prompt_template
 from recon_graphrag.communities.summarization import CommunitySummarizer
 from recon_graphrag.embeddings.base import BaseEmbedder
 from recon_graphrag.graphdb.base import GraphStore
@@ -36,6 +36,7 @@ class CommunityPipeline:
         relationship_weight_property: str = "weight",
         random_seed: Optional[int] = 42,
         report_rubric: ReportRubric | None = None,
+        report_prompt: str | None = None,
         summarize_concurrency: int = 10,
         skip_existing: bool = False,
         max_context_tokens: int = 8000,
@@ -60,6 +61,11 @@ class CommunityPipeline:
                 unweighted when this is None; Memgraph defaults to "weight".
             random_seed: Random seed for deterministic Neo4j community detection.
             report_rubric: Rating rubric for structured reports.
+            report_prompt: Custom report prompt. A simple instruction string
+                gets the structured body (context, allowlist, rubric, JSON
+                format) appended by the backend; a full template must include
+                all required placeholders (see
+                ``recon_graphrag.communities.reports.REQUIRED_REPORT_PLACEHOLDERS``).
             summarize_concurrency: Max concurrent LLM calls per level.
             skip_existing: Skip communities whose report input is unchanged.
             max_context_tokens: Maximum tokens for community context passed to the
@@ -86,6 +92,8 @@ class CommunityPipeline:
         self.relationship_weight_property = relationship_weight_property
         self.random_seed = random_seed
         self.report_rubric = report_rubric
+        self.report_prompt = report_prompt
+        validate_report_prompt_template(report_prompt)
         self.summarize_concurrency = summarize_concurrency
         self.skip_existing = skip_existing
         self.max_context_tokens = max_context_tokens
@@ -140,6 +148,7 @@ class CommunityPipeline:
             max_context_tokens=self.max_context_tokens,
             token_counter=self.token_counter,
             max_report_words=self.max_report_words,
+            report_prompt=self.report_prompt,
         )
 
         for lvl in levels:

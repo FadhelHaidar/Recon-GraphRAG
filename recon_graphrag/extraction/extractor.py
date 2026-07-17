@@ -93,7 +93,7 @@ class LLMGraphExtractor:
         if not entity_ids:
             return []
 
-        prompt = SchemaPromptBuilder.build_claim_prompt(
+        prompt = self.prompt_builder.build_claim_prompt(
             text=text,
             entity_ids=entity_ids,
         )

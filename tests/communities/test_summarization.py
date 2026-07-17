@@ -185,3 +185,20 @@ async def test_parent_report_substitutes_child_reports_when_direct_context_trunc
 
     assert "Important child report." in llm.prompts[0]
     assert report.context_truncated is True
+
+
+@pytest.mark.asyncio
+async def test_custom_report_prompt_appears_in_llm_prompt():
+    store = FakeReportGraphStore()
+    llm = CapturingValidReportLLM()
+    summarizer = CommunitySummarizer(
+        store,
+        llm=llm,
+        report_prompt="You are a security analyst. Identify risks in this community.",
+    )
+
+    await summarizer.generate_all(level=0)
+
+    assert llm.prompts
+    assert "You are a security analyst. Identify risks in this community." in llm.prompts[0]
+

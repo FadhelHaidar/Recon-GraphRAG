@@ -9,12 +9,14 @@ import pytest
 
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
 from recon_graphrag.extraction.parser import AssessmentParser
+from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.extraction.schema import (
     GraphSchema,
     NodeType,
     PropertyType,
     RelationshipType,
 )
+
 def _make_schema() -> GraphSchema:
     return GraphSchema(
         node_types=[
@@ -346,3 +348,74 @@ async def test_extract_claims_empty_entity_ids_skips_call():
 
     assert llm.ainvoke.call_count == 0
     assert claims == []
+
+
+# ---------------------------------------------------------------------------
+# Custom prompt builder tests
+# ---------------------------------------------------------------------------
+
+
+class _CustomBuilder(SchemaPromptBuilder):
+    def build_prompt(self, text, schema):
+        return "CUSTOM-EXTRACT"
+
+    def build_claim_prompt(self, text, entity_ids):
+        return "CUSTOM-CLAIM"
+
+
+@pytest.mark.asyncio
+async def test_extractor_uses_string_claim_prompt():
+    claim_response = json.dumps([
+        {
+            "subject_entity_id": "person:alice",
+            "claim_type": "role",
+            "description": "Alice is the CEO.",
+            "status": "active",
+        }
+    ])
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content=claim_response))
+
+    builder = SchemaPromptBuilder(claim_prompt="Extract legal claims from {text} for {entity_ids}")
+    extractor = LLMGraphExtractor(llm, prompt_builder=builder)
+    await extractor.extract_claims(
+        text="Alice runs the company.",
+        entity_ids=["person:alice"],
+    )
+
+    prompt = llm.ainvoke.call_args[0][0]
+    assert "Extract legal claims from Alice runs the company." in prompt
+    assert "person:alice" in prompt
+
+@pytest.mark.asyncio
+async def test_extractor_uses_custom_build_prompt():
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content=_make_initial_response()))
+
+    extractor = LLMGraphExtractor(llm, prompt_builder=_CustomBuilder())
+    schema = _make_schema()
+    await extractor.extract("Alice acted in Inception.", schema, max_gleanings=0)
+
+    assert llm.ainvoke.call_args[0][0] == "CUSTOM-EXTRACT"
+
+
+@pytest.mark.asyncio
+async def test_extractor_uses_custom_claim_prompt():
+    claim_response = json.dumps([
+        {
+            "subject_entity_id": "person:alice",
+            "claim_type": "role",
+            "description": "Alice is the CEO.",
+            "status": "active",
+        }
+    ])
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content=claim_response))
+
+    extractor = LLMGraphExtractor(llm, prompt_builder=_CustomBuilder())
+    await extractor.extract_claims(
+        text="Alice runs the company.",
+        entity_ids=["person:alice"],
+    )
+
+    assert llm.ainvoke.call_args[0][0] == "CUSTOM-CLAIM"

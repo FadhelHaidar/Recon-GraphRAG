@@ -26,6 +26,7 @@ from recon_graphrag.extraction.chunking import (
 )
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
 from recon_graphrag.extraction.description_summarizer import DescriptionSummarizer
+from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.extraction.schema import GraphSchema
 from recon_graphrag.extraction.structured import (
     RowMapping,
@@ -81,6 +82,12 @@ class GraphBuilderPipeline:
         summarization_limit: int = 500,
         fail_on_resolution_error: bool = False,
         fail_on_embedding_error: bool = False,
+        extraction_prompt: str | None = None,
+        assessment_prompt: str | None = None,
+        continuation_prompt: str | None = None,
+        claim_prompt: str | None = None,
+        entity_summary_prompt: str | None = None,
+        relationship_summary_prompt: str | None = None,
     ):
         self.graph_store = graph_store
         self.llm = llm
@@ -105,7 +112,17 @@ class GraphBuilderPipeline:
         self.fail_on_resolution_error = fail_on_resolution_error
         self.fail_on_embedding_error = fail_on_embedding_error
 
-        self.extractor = LLMGraphExtractor(llm)
+        # All-None strings produce the default prompts unchanged.
+        self.prompt_builder = SchemaPromptBuilder(
+            extraction_prompt=extraction_prompt,
+            assessment_prompt=assessment_prompt,
+            continuation_prompt=continuation_prompt,
+            claim_prompt=claim_prompt,
+            entity_summary_prompt=entity_summary_prompt,
+            relationship_summary_prompt=relationship_summary_prompt,
+        )
+
+        self.extractor = LLMGraphExtractor(llm, prompt_builder=self.prompt_builder)
         self.validator = SchemaValidator()
         self.assembler = GraphDocumentAssembler()
         self.graph_writer = graph_writer or graph_store
@@ -624,6 +641,7 @@ class GraphBuilderPipeline:
                 self.graph_store,
                 self.graph_name,
                 concurrency=self.summarization_concurrency,
+                prompt_builder=self.prompt_builder,
             )
             await summarizer.summarize_entities(limit=self.summarization_limit)
             await summarizer.summarize_relationships(limit=self.summarization_limit)

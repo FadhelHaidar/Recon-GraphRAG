@@ -28,6 +28,7 @@ from recon_graphrag.extraction.artifacts import (
     load_graph_document_json,
     save_graph_document_json,
 )
+from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 
 __all__ = [
     "GraphSchema",
@@ -53,4 +54,5 @@ __all__ = [
     "graph_document_from_dict",
     "save_graph_document_json",
     "load_graph_document_json",
+    "SchemaPromptBuilder",
 ]

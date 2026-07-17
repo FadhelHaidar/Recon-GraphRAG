@@ -11,6 +11,7 @@ from recon_graphrag.models.artifacts import (
     CommunityReport,
     FindingReference,
 )
+from recon_graphrag.utils.templates import format_template, has_placeholder
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +68,46 @@ Do NOT reference IDs not present in the allowlist.
 {length_instruction}"""
 
 
+# Everything after the default first paragraph: the structured body (context,
+# allowlist, rubric, JSON format) appended to pure-string custom prompts.
+_DEFAULT_REPORT_BODY = DEFAULT_REPORT_PROMPT.split("\n\n", 1)[1]
+
+
+REQUIRED_REPORT_PLACEHOLDERS = [
+    "community_id",
+    "level",
+    "context",
+    "reference_ids",
+    "min_rating",
+    "max_rating",
+    "rating_name",
+    "rating_description",
+    "length_instruction",
+]
+
+
+def validate_report_prompt_template(template: str | None) -> None:
+    """Validate a custom report prompt template.
+
+    A pure string (no placeholders) is allowed; it will be prepended as the
+    instruction and the default structured body will be appended. A template
+    that contains at least one required placeholder must include all of them.
+
+    Raises:
+        ValueError: If the template is missing a required placeholder.
+    """
+    if template is None:
+        return
+    present = [p for p in REQUIRED_REPORT_PLACEHOLDERS if has_placeholder(template, p)]
+    if not present:
+        return
+    missing = [p for p in REQUIRED_REPORT_PLACEHOLDERS if p not in present]
+    if missing:
+        raise ValueError(
+            f"report prompt template is missing required placeholders: {', '.join(missing)}"
+        )
+
+
 @dataclass
 class ReportRubric:
     """Rating rubric for community reports."""
@@ -84,6 +125,7 @@ def build_report_prompt(
     reference_ids: list[str],
     rubric: ReportRubric | None = None,
     max_report_words: int | None = 2000,
+    prompt_template: str | None = None,
 ) -> str:
     """Build a structured report prompt for a community.
 
@@ -95,9 +137,18 @@ def build_report_prompt(
         rubric: Rating rubric. Uses default if None.
         max_report_words: Soft word limit stated in the prompt. None omits
             the instruction (only the LLM's max_tokens then bounds output).
+        prompt_template: Custom prompt. A pure string (no required
+            placeholders) is used as the instruction with the default
+            structured body appended; a template containing any required
+            placeholder must include all of them. Defaults to
+            ``DEFAULT_REPORT_PROMPT``.
 
     Returns:
         Prompt string requesting structured JSON report.
+
+    Raises:
+        ValueError: If ``prompt_template`` includes some but not all
+            required placeholders.
     """
     rubric = rubric or ReportRubric()
     ref_list = "\n".join(f"  - {rid}" for rid in reference_ids)
@@ -106,7 +157,18 @@ def build_report_prompt(
         if max_report_words
         else ""
     )
-    return DEFAULT_REPORT_PROMPT.format(
+
+    validate_report_prompt_template(prompt_template)
+    if prompt_template is None:
+        template = DEFAULT_REPORT_PROMPT
+    elif not any(has_placeholder(prompt_template, p) for p in REQUIRED_REPORT_PLACEHOLDERS):
+        # Pure string: use it as the instruction and append the default body.
+        template = prompt_template + "\n\n" + _DEFAULT_REPORT_BODY
+    else:
+        template = prompt_template
+
+    return format_template(
+        template,
         community_id=community_id,
         level=level,
         context=context,

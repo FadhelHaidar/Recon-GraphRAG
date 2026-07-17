@@ -47,13 +47,14 @@ class DescriptionSummarizer:
         graph_store: GraphStore,
         graph_name: str,
         concurrency: int = 5,
+        prompt_builder: SchemaPromptBuilder | None = None,
     ):
         self.llm = llm
         self.graph_store = graph_store
         self.graph_name = graph_name
         self.concurrency = max(int(concurrency), 1)
         self.parser = DescriptionSummaryParser()
-        self.prompts = SchemaPromptBuilder()
+        self.prompts = prompt_builder or SchemaPromptBuilder()
 
     async def summarize_entities(self, limit: int = 500) -> dict:
         return await self._summarize_loop(

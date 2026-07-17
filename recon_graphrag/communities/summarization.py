@@ -43,6 +43,7 @@ from recon_graphrag.communities.reports import (
     ReportValidationError,
     build_repair_prompt,
     build_report_prompt,
+    validate_report_prompt_template,
 )
 from recon_graphrag.graphdb.base import GraphStore
 from recon_graphrag.llm.base import BaseLLM, LLMResponse
@@ -77,6 +78,7 @@ class CommunitySummarizer:
         max_context_tokens: int | None = None,
         token_counter: TokenCounter | None = None,
         max_report_words: int | None = 2000,
+        report_prompt: str | None = None,
     ):
         self.graph_store = graph_store
         self.llm = llm
@@ -86,6 +88,8 @@ class CommunitySummarizer:
         self.max_context_tokens = max_context_tokens
         self.token_counter = token_counter
         self.max_report_words = max_report_words
+        self.report_prompt = report_prompt
+        validate_report_prompt_template(report_prompt)
         self._report_parser = ReportParser()
 
     async def generate_all(
@@ -271,6 +275,7 @@ class CommunitySummarizer:
             reference_ids=reference_ids,
             rubric=self.report_rubric,
             max_report_words=self.max_report_words,
+            prompt_template=self.report_prompt,
         )
 
         # First attempt
