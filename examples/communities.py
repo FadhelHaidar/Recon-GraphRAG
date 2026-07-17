@@ -24,6 +24,7 @@ try:
         get_embedder,
         get_llm,
     )
+    from .prompts import COMMUNITY_REPORT_PROMPT
     from .schema import COMMUNITY_RELATIONSHIP_TYPES
 except ImportError:
     from common import BACKEND_CHOICES, get_backend_targets
@@ -32,6 +33,7 @@ except ImportError:
         get_embedder,
         get_llm,
     )
+    from prompts import COMMUNITY_REPORT_PROMPT
     from schema import COMMUNITY_RELATIONSHIP_TYPES
 
 
@@ -126,6 +128,7 @@ async def build_communities(
             "theta": community_theta,
             "tolerance": community_tolerance,
             "random_seed": random_seed,
+            "report_prompt": COMMUNITY_REPORT_PROMPT,
         }
 
         community = CommunityPipeline(store, llm, embedder=embedder, **kwargs)

@@ -18,11 +18,13 @@ from recon_graphrag.extraction.assembler import GraphDocumentAssembler
 from recon_graphrag.extraction.artifacts import save_graph_document_json
 from recon_graphrag.extraction.chunking import PageWindowBuilder
 from recon_graphrag.extraction.extractor import LLMGraphExtractor
+from recon_graphrag.extraction.prompts import SchemaPromptBuilder
 from recon_graphrag.extraction.validator import SchemaValidator
 
 from common import DEFAULT_ARTIFACT_PATH
 from config import get_llm
 from data import MOVIE_EXAMPLE_PAGES
+from prompts import EXTRACTION_PROMPT
 from schema import MOVIE_SCHEMA
 
 
@@ -71,8 +73,11 @@ async def extract_to_artifact(output: Path, llm_provider: str):
             metadata=metadata,
         )
 
-        # 2. Extract entities and relationships per chunk
-        extractor = LLMGraphExtractor(llm)
+        # 2. Extract entities and relationships per chunk, using the
+        # movie-domain extraction prompt (the backend appends the schema,
+        # rules, and JSON format sections).
+        prompt_builder = SchemaPromptBuilder(extraction_prompt=EXTRACTION_PROMPT)
+        extractor = LLMGraphExtractor(llm, prompt_builder=prompt_builder)
         validator = SchemaValidator()
         chunk_extractions = {}
 
